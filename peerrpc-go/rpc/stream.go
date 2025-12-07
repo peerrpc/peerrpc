@@ -1,0 +1,197 @@
+package rpc
+
+import (
+	"context"
+	"io"
+	"sync"
+
+	peerrpcpb "github.com/peerrpc/go/gen/proto/peerrpc"
+)
+
+// ServerStream is the per-RPC object a MethodDesc.Handler receives.
+//
+// It exposes:
+//   - Recv to read request messages (one per client Data frame).
+//   - Send to write response messages (one Data frame each).
+//   - SetHeader / SetTrailer for metadata.
+//   - Context for deadline + cancellation propagation.
+type ServerStream struct {
+	ctx context.Context
+
+	// inbound: raw payload bytes from the client, in arrival order.
+	// inline_data from Call is delivered as the first message.
+	inbound chan []byte
+
+	// halfClose is closed when the client has sent CloseSend. After
+	// this, Recv returns io.EOF.
+	halfClose chan struct{}
+
+	method string
+	mux    *multiplexer
+	seq    int
+
+	hdr      *metadataHolder
+	hdrState headerState
+	hdrMu    sync.Mutex
+}
+
+// headerState tracks whether the Begin frame has been flushed yet so
+// that SetHeader called after the first Send panics (matches
+// grpc-go / connect-go).
+type headerState struct {
+	headerSent bool
+}
+
+// newServerStream constructs a stream owned by the multiplexer.
+func newServerStream(ctx context.Context, method string, mux *multiplexer, seq int) *ServerStream {
+	return &ServerStream{
+		ctx:       ctx,
+		inbound:   make(chan []byte, 16),
+		halfClose: make(chan struct{}),
+		method:    method,
+		mux:       mux,
+		seq:       seq,
+		hdr:       newMetadataHolder(),
+	}
+}
+
+// Context exposes the per-RPC context.
+func (s *ServerStream) Context() context.Context { return s.ctx }
+
+// Method returns the fully-qualified method path.
+func (s *ServerStream) Method() string { return s.method }
+
+// Recv blocks until the next request message arrives, the client
+// half-closes (returns io.EOF), or ctx is canceled.
+//
+// When both inbound and halfClose are ready (common when a Unary
+// client inlines its payload and immediately half-closes), Recv
+// drains pending messages first before declaring EOF.
+func (s *ServerStream) Recv() ([]byte, error) {
+	// Non-blocking check first so the inline-payload + CloseSend race
+	// resolves in favor of delivering data.
+	select {
+	case b, ok := <-s.inbound:
+		if !ok {
+			return nil, io.EOF
+		}
+		return b, nil
+	default:
+	}
+	select {
+	case b, ok := <-s.inbound:
+		if !ok {
+			return nil, io.EOF
+		}
+		return b, nil
+	case <-s.halfClose:
+		return nil, io.EOF
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	}
+}
+
+// Send queues a response message. It returns once the multiplexer has
+// accepted the frame, NOT once the bytes are on the wire.
+func (s *ServerStream) Send(b []byte) error {
+	// Begin must precede the first Data frame.
+	if err := s.mux.flushBeginOnce(s); err != nil {
+		return err
+	}
+	frame := &peerrpcpb.ResponseFrame{
+		Routing: &peerrpcpb.Routing{Sequence: int32(s.seq)},
+		Type: &peerrpcpb.ResponseFrame_Data{
+			Data: &peerrpcpb.Data{
+				Content: &peerrpcpb.Data_Message{Message: append([]byte(nil), b...)},
+			},
+		},
+	}
+	return s.mux.queue(frame)
+}
+
+// SetHeader attaches header metadata. MUST be called before the first
+// Send (the header rides with the Begin frame).
+func (s *ServerStream) SetHeader(kv map[string][]string) {
+	s.hdrMu.Lock()
+	defer s.hdrMu.Unlock()
+	if s.hdrState.headerSent {
+		panic("rpc: SetHeader called after header was already sent")
+	}
+	s.hdr.SetHeader(kv)
+}
+
+// SetTrailer attaches trailer metadata sent with End.
+func (s *ServerStream) SetTrailer(kv map[string][]string) {
+	s.hdr.SetTrailer(kv)
+}
+
+// Header / Trailer return snapshots of the outgoing header / trailer.
+// Used by interceptors and tests.
+func (s *ServerStream) Header() map[string][]string { return s.hdr.Header() }
+func (s *ServerStream) Trailer() map[string][]string { return s.hdr.Trailer() }
+
+// metadataHolder holds one direction's metadata with thread-safety.
+type metadataHolder struct {
+	mu      sync.Mutex
+	md      *peerrpcpb.Metadata
+}
+
+func newMetadataHolder() *metadataHolder {
+	return &metadataHolder{md: &peerrpcpb.Metadata{Md: map[string]*peerrpcpb.Strings{}}}
+}
+
+func (m *metadataHolder) SetHeader(kv map[string][]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mergeMetadata(m.md, kv)
+}
+
+func (m *metadataHolder) SetTrailer(kv map[string][]string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mergeMetadata(m.md, kv)
+}
+
+func (m *metadataHolder) Snapshot() *peerrpcpb.Metadata {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := &peerrpcpb.Metadata{Md: map[string]*peerrpcpb.Strings{}}
+	for k, vs := range m.md.Md {
+		out.Md[k] = &peerrpcpb.Strings{Values: append([]string(nil), vs.Values...)}
+	}
+	return out
+}
+
+func (m *metadataHolder) Header() map[string][]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return copyMetadata(m.md)
+}
+
+// alias used by tests for Trailer() too.
+func (m *metadataHolder) Trailer() map[string][]string { return m.Header() }
+
+func mergeMetadata(dst *peerrpcpb.Metadata, kv map[string][]string) {
+	if dst.Md == nil {
+		dst.Md = map[string]*peerrpcpb.Strings{}
+	}
+	for k, vs := range kv {
+		existing := dst.Md[k]
+		if existing == nil {
+			existing = &peerrpcpb.Strings{}
+			dst.Md[k] = existing
+		}
+		existing.Values = append(existing.Values, vs...)
+	}
+}
+
+func copyMetadata(src *peerrpcpb.Metadata) map[string][]string {
+	out := map[string][]string{}
+	if src == nil {
+		return out
+	}
+	for k, vs := range src.Md {
+		out[k] = append([]string(nil), vs.Values...)
+	}
+	return out
+}
