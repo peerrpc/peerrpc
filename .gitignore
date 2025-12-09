@@ -34,3 +34,7 @@ coverage/
 
 # Buf
 .buf-cache/
+
+# Go binaries
+*.exe
+peerrpc-echo
