@@ -44,7 +44,11 @@ func main() {
 
 	descriptors := make(map[string]any, len(vectors))
 	for _, v := range vectors {
-		bin, err := proto.Marshal(v.msg)
+		// Deterministic mode is mandatory for golden vectors: protobuf
+		// maps have non-deterministic iteration by default, so without
+		// this flag the re-encoded bytes of e.g. a Call with multiple
+		// metadata entries would differ run-to-run.
+		bin, err := (proto.MarshalOptions{Deterministic: true}).Marshal(v.msg)
 		if err != nil {
 			log.Fatalf("marshal %s: %v", v.name, err)
 		}
@@ -56,7 +60,7 @@ func main() {
 
 		// Re-decode to verify round-trip determinism against the bytes
 		// we just wrote. This catches non-deterministic encoders early.
-		round, err := proto.Marshal(v.msg)
+		round, err := (proto.MarshalOptions{Deterministic: true}).Marshal(v.msg)
 		if err != nil || !equalBytes(round, bin) {
 			log.Fatalf("non-deterministic encode for %s", v.name)
 		}

@@ -107,7 +107,9 @@ func TestGoldenVectors_DecodeEncodeRoundTrip(t *testing.T) {
 			if err := proto.Unmarshal(raw, msg); err != nil {
 				t.Fatalf("unmarshal %s (%d bytes): %v", name, len(raw), err)
 			}
-			reencoded, err := proto.Marshal(msg)
+			// Match the generator's mode: deterministic marshaling so
+			// protobuf map iteration order does not flake the test.
+			reencoded, err := (proto.MarshalOptions{Deterministic: true}).Marshal(msg)
 			if err != nil {
 				t.Fatalf("marshal %s: %v", name, err)
 			}
