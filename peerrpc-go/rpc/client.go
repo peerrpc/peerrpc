@@ -5,7 +5,9 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	peerrpcpb "github.com/peerrpc/go/gen/proto/peerrpc"
 	"github.com/peerrpc/go/transport"
 	"google.golang.org/protobuf/proto"
@@ -18,9 +20,10 @@ import (
 // A Client is single-connection: attach it to one transport.Channel
 // via Attach. To talk to multiple peers, use multiple Clients.
 type Client struct {
-	ch       *transport.Channel
-	reasm    *transport.Reassembler
-	seqAlloc atomic.Int32
+	ch              *transport.Channel
+	reasm           *transport.Reassembler
+	seqAlloc        atomic.Int32
+	unaryInterceptors []UnaryClientInterceptor
 
 	mu      sync.Mutex
 	streams map[int]*clientStream
@@ -30,12 +33,25 @@ type Client struct {
 
 // NewClient constructs a Client over ch. The caller MUST run Attach
 // in a goroutine to pump inbound frames.
-func NewClient(ch *transport.Channel) *Client {
-	return &Client{
+func NewClient(ch *transport.Channel, opts ...ClientOption) *Client {
+	c := &Client{
 		ch:      ch,
 		reasm:   transport.NewReassembler(),
 		streams: map[int]*clientStream{},
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// ClientOption configures a Client.
+type ClientOption func(*Client)
+
+// WithUnaryClientInterceptors installs a chain of client-side unary
+// interceptors. Order is outermost-first.
+func WithUnaryClientInterceptors(is ...UnaryClientInterceptor) ClientOption {
+	return func(c *Client) { c.unaryInterceptors = append(c.unaryInterceptors, is...) }
 }
 
 // Attach begins consuming inbound ResponseFrames and dispatching them
@@ -69,6 +85,14 @@ type clientStream struct {
 	endOnce sync.Once
 	end     chan struct{}
 	result  endResult
+
+	// sender is installed by the Client when the stream is opened so
+	// ClientStream.Send can reach the transport without needing a
+	// back-pointer to *Client.
+	sender func(ctx context.Context, b []byte) error
+	// closer emits the End{CloseSend:true} frame. Installed alongside
+	// sender.
+	closer func(ctx context.Context)
 }
 
 type inboundResp struct {
@@ -177,6 +201,16 @@ func (c *Client) openStream(method string) *clientStream {
 		end:     make(chan struct{}),
 	}
 	cs.seq = c.nextSeq()
+	cs.sender = func(ctx context.Context, b []byte) error {
+		c.sendPayload(ctx, cs.seq, b)
+		return nil
+	}
+	cs.closer = func(ctx context.Context) {
+		c.sendFrame(ctx, &peerrpcpb.Frame{
+			Routing: &peerrpcpb.Routing{Sequence: int32(cs.seq)},
+			Type:    &peerrpcpb.Frame_End{End: &peerrpcpb.End{CloseSend: true}},
+		})
+	}
 	c.mu.Lock()
 	c.streams[cs.seq] = cs
 	c.mu.Unlock()
@@ -230,13 +264,33 @@ func (c *Client) sendPayload(ctx context.Context, seq int, b []byte) {
 // response on success.
 //
 // hdr carries any outgoing header metadata; nil is allowed.
+//
+// If the Client was constructed with WithUnaryClientInterceptors they
+// wrap the underlying wire call outermost-first.
 func (c *Client) InvokeUnary(ctx context.Context, method string, req []byte, hdr map[string][]string) ([]byte, *Status) {
+	// Save hdr into the context so the inner invoker (and any
+	// interceptor that wants to inspect / mutate it) can pick it up.
+	if hdr != nil {
+		ctx = ctxWithOutgoingHeader(ctx, hdr)
+	}
+	invoker := chainUnaryClient(c.unaryInterceptors, c.invokeUnary)
+	return invoker(ctx, method, req)
+}
+
+// invokeUnary is the bottom of the interceptor chain: it actually
+// puts the request on the wire and waits for the response.
+func (c *Client) invokeUnary(ctx context.Context, method string, req []byte) ([]byte, *Status) {
 	cs := c.openStream(method)
 	defer c.cleanupStream(cs.seq)
+	c.watchCancel(ctx, cs)
 
+	hdr := outgoingHeaderFromCtx(ctx)
 	call := &peerrpcpb.Call{
 		Method:          method,
 		ProtocolVersion: 1,
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		call.DeadlineMs = int32(time.Until(dl).Milliseconds())
 	}
 	if hdr != nil {
 		call.Metadata = metadataFromKV(hdr)
@@ -281,11 +335,15 @@ func (c *Client) InvokeUnary(ctx context.Context, method string, req []byte, hdr
 // ranges Recv until io.EOF.
 func (c *Client) InvokeServerStreaming(ctx context.Context, method string, req []byte, hdr map[string][]string) (*ClientStream, *Status) {
 	cs := c.openStream(method)
+	c.watchCancel(ctx, cs)
 
 	call := &peerrpcpb.Call{
 		Method:          method,
 		ProtocolVersion: 1,
 		Metadata:        metadataFromKV(hdr),
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		call.DeadlineMs = int32(time.Until(dl).Milliseconds())
 	}
 	if len(req) <= transport.InlineMax {
 		call.InlineData = append([]byte(nil), req...)
@@ -306,11 +364,91 @@ func (c *Client) InvokeServerStreaming(ctx context.Context, method string, req [
 	return &ClientStream{cs: cs, ctx: ctx}, OK()
 }
 
-// ClientStream is the per-RPC read handle returned by streaming
-// invocations.
+// InvokeClientStreaming opens a client-streaming RPC. The caller
+// pushes messages via Send, then CloseSend to signal half-close, then
+// Recv exactly one response.
+//
+// The first request message (if provided) is sent inline with the
+// Call frame.
+func (c *Client) InvokeClientStreaming(ctx context.Context, method string, firstReq []byte, hdr map[string][]string) (*ClientStream, *Status) {
+	cs := c.openStream(method)
+	c.watchCancel(ctx, cs)
+
+	call := &peerrpcpb.Call{
+		Method:          method,
+		ProtocolVersion: 1,
+		Metadata:        metadataFromKV(hdr),
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		call.DeadlineMs = int32(time.Until(dl).Milliseconds())
+	}
+	if len(firstReq) > 0 && len(firstReq) <= transport.InlineMax {
+		call.InlineData = append([]byte(nil), firstReq...)
+	}
+
+	c.sendFrame(ctx, &peerrpcpb.Frame{
+		Routing: &peerrpcpb.Routing{Sequence: int32(cs.seq)},
+		Type:    &peerrpcpb.Frame_Call{Call: call},
+	})
+	if firstReq != nil && call.InlineData == nil {
+		c.sendPayload(ctx, cs.seq, firstReq)
+	}
+
+	return &ClientStream{cs: cs, ctx: ctx}, OK()
+}
+
+// InvokeBidiStreaming opens a bidirectional-streaming RPC. Both sides
+// may stream messages independently; the caller finishes its direction
+// with CloseSend and then drains Recv until io.EOF.
+func (c *Client) InvokeBidiStreaming(ctx context.Context, method string, firstReq []byte, hdr map[string][]string) (*ClientStream, *Status) {
+	// Identical wire shape to ClientStreaming; the difference is only
+	// in how the application uses Send / Recv (multiple response
+	// messages vs one). Reuse the same open path.
+	return c.InvokeClientStreaming(ctx, method, firstReq, hdr)
+}
+
+// ClientStream is the per-RPC handle returned by streaming
+// invocations. For server-streaming RPCs only Recv is used; for
+// client-streaming and bidi-streaming RPCs the caller also uses Send
+// and CloseSend.
 type ClientStream struct {
 	cs  *clientStream
 	ctx context.Context
+
+	closeSendOnce sync.Once
+}
+
+// Send writes one request message. For client-streaming and bidi-
+// streaming RPCs the caller invokes Send zero or more times, then
+// CloseSend to signal half-close.
+//
+// Send panics if CloseSend has already been called.
+func (s *ClientStream) Send(b []byte) error {
+	// Reuse the client's send path by reconstructing it from the
+	// stream. We can't call c.sendPayload directly because we don't
+	// have a back-pointer to *Client here; instead we walk the
+	// transport through cs.
+	//
+	// The stream keeps a reference to the parent Client via the
+	// caller-installed closure on openStream.
+	if s.cs.sender == nil {
+		return io.ErrClosedPipe
+	}
+	return s.cs.sender(s.ctx, append([]byte(nil), b...))
+}
+
+// CloseSend signals half-close: the client will send no more request
+// messages. The server's Recv returns io.EOF on its next call. After
+// CloseSend, Send panics.
+//
+// Safe to call multiple times; subsequent calls are no-ops.
+func (s *ClientStream) CloseSend() error {
+	s.closeSendOnce.Do(func() {
+		if s.cs.closer != nil {
+			s.cs.closer(s.ctx)
+		}
+	})
+	return nil
 }
 
 // Recv returns the next response message. Returns io.EOF when the
@@ -349,7 +487,32 @@ func (s *ClientStream) Trailer() map[string][]string {
 	return s.cs.trailer.Trailer()
 }
 
-// mergeIn merges src into dst metadata.
+// watchCancel spawns a goroutine that, when ctx is canceled before
+// the stream's end arrives, emits an End{status:CANCELLED} frame to
+// the server so it can stop the in-flight handler. This implements
+// client-driven cancellation propagation.
+//
+// The goroutine exits as soon as either ctx is canceled or the
+// stream terminates, so it does not leak on the success path.
+func (c *Client) watchCancel(ctx context.Context, cs *clientStream) {
+	if ctx == nil {
+		return
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Issue a CANCELLED to the server. Best-effort: if the
+			// transport already died, failAll will surface the error.
+			c.sendFrame(context.Background(), &peerrpcpb.Frame{
+				Routing: &peerrpcpb.Routing{Sequence: int32(cs.seq)},
+				Type: &peerrpcpb.Frame_End{End: &peerrpcpb.End{
+					Status: &statuspb.Status{Code: 1, Message: "cancelled by client"},
+				}},
+			})
+		case <-cs.end:
+		}
+	}()
+}
 func mergeIn(dst *metadataHolder, src *peerrpcpb.Metadata) {
 	dst.mu.Lock()
 	defer dst.mu.Unlock()

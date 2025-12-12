@@ -20,13 +20,35 @@ import (
 // transport.Channel via Serve. To serve multiple peers, instantiate
 // multiple Servers.
 type Server struct {
-	mu      sync.RWMutex
-	methods map[string]MethodDesc
+	mu                  sync.RWMutex
+	methods             map[string]MethodDesc
+	unaryInterceptors   []UnaryServerInterceptor
+	streamInterceptors  []StreamServerInterceptor
 }
 
-// NewServer constructs an empty Server.
-func NewServer() *Server {
-	return &Server{methods: map[string]MethodDesc{}}
+// NewServer constructs an empty Server. Optional WithInterceptors
+// options install middleware that wraps every handler invocation.
+func NewServer(opts ...ServerOption) *Server {
+	s := &Server{methods: map[string]MethodDesc{}}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// ServerOption configures a Server.
+type ServerOption func(*Server)
+
+// WithUnaryServerInterceptors installs a chain of unary interceptors.
+// Order is outermost-first.
+func WithUnaryServerInterceptors(is ...UnaryServerInterceptor) ServerOption {
+	return func(s *Server) { s.unaryInterceptors = append(s.unaryInterceptors, is...) }
+}
+
+// WithStreamServerInterceptors installs a chain of stream interceptors.
+// Order is outermost-first.
+func WithStreamServerInterceptors(is ...StreamServerInterceptor) ServerOption {
+	return func(s *Server) { s.streamInterceptors = append(s.streamInterceptors, is...) }
 }
 
 // RegisterService installs every method of desc under its fully
@@ -60,7 +82,7 @@ func (s *Server) findMethod(path string) (MethodDesc, bool) {
 // Calling Serve twice on the same Server is undefined; create a new
 // Server per transport.
 func (s *Server) Serve(ctx context.Context, ch *transport.Channel) error {
-	mux := newMultiplexer(ctx, ch)
+	mux := newMultiplexer(ctx, s, ch)
 	go mux.runWriter()
 	defer mux.shutdown()
 
@@ -84,9 +106,10 @@ func (s *Server) Serve(ctx context.Context, ch *transport.Channel) error {
 // multiplexer owns the per-sequence routing for one Server (or one
 // Client). It maps Routing.sequence -> active stream state.
 type multiplexer struct {
-	ctx context.Context
-	ch  *transport.Channel
-	out chan outboundFrame
+	ctx  context.Context
+	ch   *transport.Channel
+	srv  *Server
+	out  chan outboundFrame
 
 	mu      sync.Mutex
 	streams map[int]*streamState
@@ -110,10 +133,11 @@ type outboundFrame struct {
 	done  chan struct{}
 }
 
-func newMultiplexer(ctx context.Context, ch *transport.Channel) *multiplexer {
+func newMultiplexer(ctx context.Context, srv *Server, ch *transport.Channel) *multiplexer {
 	return &multiplexer{
 		ctx:     ctx,
 		ch:      ch,
+		srv:     srv,
 		out:     make(chan outboundFrame, 256),
 		streams: map[int]*streamState{},
 		done:    make(chan struct{}),
@@ -182,10 +206,14 @@ func (m *multiplexer) openStream(ctx context.Context, s *Server, seq int, call *
 }
 
 // runHandler invokes the per-RPC handler and translates its return
-// value into a final End frame.
+// value into a final End frame. Stream interceptors wrap the handler
+// from outermost-first; the chain bottoms out at st.method.Handler.
 func (m *multiplexer) runHandler(seq int, st *streamState) {
 	defer st.cancel()
-	status := st.method.Handler(st.stream.ctx, st.stream)
+
+	info := &StreamServerInfo{Method: st.method.Method, Kind: st.method.Kind}
+	chain := chainStreamServer(m.srv.streamInterceptors, info, st.method.Handler)
+	status := chain(st.stream.ctx, st.stream)
 	trailer := st.stream.hdr.Snapshot()
 	end := &peerrpcpb.End{Trailer: trailer, Status: status.toProto()}
 	m.endStream(seq, end)
