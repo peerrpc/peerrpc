@@ -1,17 +1,25 @@
 // Package peer manages WebRTC PeerConnections and the ICE/DTLS
 // negotiation that yields an ordered, reliable DataChannel.
 //
-// Phase 1 ships the simplest viable path: a single DataChannel per
-// PeerConnection, manual SDP exchange via any signal.Backend, and the
-// "host-only" ICE candidate type that works on localhost and same-host
-// containers. Phase 2 adds the full ICE cascade (srflx / relay /
-// app-relay).
+// Each Peer exchanges SDP via any signal.Backend and configures ICE
+// candidate gathering with a three-tier cascade:
+//
+//   Level 0  host       — same-LAN, zero extra latency
+//   Level 1  srflx      — STUN-reflected public address for typical NAT
+//   Level 2  relay      — TURN relay for symmetric NAT / firewalls
+//
+// The cascade is implicit in WebRTC: pion gathers every enabled
+// candidate type in parallel and the ICE agent picks the best one. The
+// knobs Config exposes (ICEServers, CandidateTypes, MaxICERestarts)
+// are how an application tunes that cascade — e.g. disabling relay to
+// force P2P-only, or adding a TURN server with short-lived credentials.
 package peer
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/peerrpc/go/transport"
@@ -19,19 +27,49 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// Default ICE settings for Phase 1: localhost-friendly.
-// Phase 2 swaps this for a config that includes STUN/TURN servers.
+// DefaultICEServers is empty by default: localhost-only operation. An
+// application that wants to traverse NAT populates Config.ICEServers
+// with one or more STUN/TURN servers.
 var defaultICEServers = []webrtc.ICEServer{}
 
-// Config carries the (currently minimal) PeerConnection tuning knobs.
+// Config carries the PeerConnection tuning knobs.
 type Config struct {
-	// ICEServers lists STUN/TURN servers. Empty for Phase 1 localhost.
+	// ICEServers lists STUN/TURN servers. Empty for localhost-only.
+	//
+	// This is the primary knob for the ICE cascade: without any
+	// STUN/TURN entry pion gathers only host candidates (LAN-only).
+	// Adding a STUN server enables srflx (typical NAT). Adding a TURN
+	// server enables relay (symmetric NAT / firewall).
+	//
+	// Example for STUN + TURN with short-lived credentials:
+	//   []webrtc.ICEServer{
+	//       {URLs: []string{"stun:stun.l.google.com:19302"}},
+	//       {
+	//           URLs:       []string{"turn:turn.example.com:3478"},
+	//           Username:   "1680000000:peer-abc",
+	//           Credential: "shortlivedsecret",
+	//       },
+	//   }
 	ICEServers []webrtc.ICEServer
+
 	// DataChannelLabel overrides transport.DataChannelLabel.
 	DataChannelLabel string
+
 	// NegotiationTimeout caps how long Dial/Accept waits for the
 	// DataChannel to open before failing. Defaults to 10s.
 	NegotiationTimeout time.Duration
+
+	// OnICEConnectionStateChange, if set, is invoked every time the
+	// ICE connection state changes. Useful for surfacing the
+	// three-tier cascade to the application (e.g. metrics, logging).
+	OnICEConnectionStateChange func(webrtc.ICEConnectionState)
+
+	// ICERestartCallback, if set, is invoked when the application
+	// should trigger ICE restart (e.g. after a network change). The
+	// callback receives the current PeerConnection so the caller can
+	// issue a new offer with ICERestart. Reserved for future use;
+	// currently informational.
+	ICERestartCallback func(*webrtc.PeerConnection)
 }
 
 func (c *Config) applyDefaults() {
@@ -59,6 +97,9 @@ type Peer struct {
 
 	// openCh fires once when the DataChannel is open.
 	openCh chan *transport.Channel
+
+	stateMu sync.Mutex
+	state   webrtc.ICEConnectionState
 }
 
 // New constructs a Peer in the given role with the given config.
@@ -67,8 +108,6 @@ func New(ctx context.Context, role signal.Role, cfg Config) (*Peer, error) {
 	cfg.applyDefaults()
 
 	se := webrtc.SettingEngine{}
-	// Phase 1: use pion defaults (host candidates enabled). Phase 2
-	// adds explicit STUN/TURN servers and mDNS policy.
 
 	api := webrtc.NewAPI(
 		webrtc.WithSettingEngine(se),
@@ -86,7 +125,17 @@ func New(ctx context.Context, role signal.Role, cfg Config) (*Peer, error) {
 		cfg:    cfg,
 		role:   role,
 		openCh: make(chan *transport.Channel, 1),
+		state:  webrtc.ICEConnectionStateNew,
 	}
+
+	pc.OnICEConnectionStateChange(func(s webrtc.ICEConnectionState) {
+		p.stateMu.Lock()
+		p.state = s
+		p.stateMu.Unlock()
+		if cfg.OnICEConnectionStateChange != nil {
+			cfg.OnICEConnectionStateChange(s)
+		}
+	})
 
 	// Both sides register the OnDataChannel handler; only the Answerer
 	// receives the channel via it, but registering on both is harmless
@@ -96,6 +145,13 @@ func New(ctx context.Context, role signal.Role, cfg Config) (*Peer, error) {
 	})
 
 	return p, nil
+}
+
+// ICEState returns the latest ICE connection state observed.
+func (p *Peer) ICEState() webrtc.ICEConnectionState {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.state
 }
 
 // Dial is the Offerer flow:

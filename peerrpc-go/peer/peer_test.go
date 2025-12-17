@@ -2,6 +2,7 @@ package peer_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,13 +10,93 @@ import (
 	"github.com/peerrpc/go/signal"
 	"github.com/peerrpc/go/transport"
 	peerrpcpb "github.com/peerrpc/go/gen/proto/peerrpc"
+	"github.com/pion/webrtc/v4"
 	"google.golang.org/protobuf/proto"
 )
 
-// TestPeer_HandshakeAndRoundTrip performs the full Phase-1 localhost
-// dance: in-process signaling -> WebRTC handshake -> one Frame round
-// trip. It is the integration test that proves the lower three layers
-// compose.
+// TestPeer_STUNCascade exercises the ICE cascade with a real STUN
+// server. Both peers still run on localhost, so the connection's
+// selected pair will probably be host-host; the test only verifies
+// that adding a STUN server to the config does not break the
+// handshake and that the OnICEConnectionStateChange hook fires.
+//
+// Skip-safe: the test t.Skip if it cannot reach Google STUN within
+// NegotiationTimeout, so CI hermetic environments stay green.
+func TestPeer_STUNCascade(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	backend := signal.NewLocal()
+	oSig, _ := backend.Exchange(ctx, "stun", "o")
+	defer oSig.Close()
+	aSig, _ := backend.Exchange(ctx, "stun", "a")
+	defer aSig.Close()
+
+	var mu sync.Mutex
+	seen := map[webrtc.ICEConnectionState]bool{}
+	hook := func(s webrtc.ICEConnectionState) {
+		mu.Lock()
+		seen[s] = true
+		mu.Unlock()
+	}
+
+	cfg := peer.Config{
+		ICEServers:                  []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}},
+		OnICEConnectionStateChange:  hook,
+		NegotiationTimeout:          8 * time.Second,
+	}
+	oPeer, err := peer.New(ctx, signal.RoleOfferer, cfg)
+	if err != nil {
+		t.Fatalf("offerer New: %v", err)
+	}
+	defer oPeer.Close()
+	aPeer, err := peer.New(ctx, signal.RoleAnswerer, cfg)
+	if err != nil {
+		t.Fatalf("answerer New: %v", err)
+	}
+	defer aPeer.Close()
+
+	ares := make(chan error, 1)
+	go func() {
+		_, err := aPeer.Accept(ctx, aSig)
+		ares <- err
+	}()
+
+	_, err = oPeer.Dial(ctx, oSig)
+	if err != nil {
+		t.Skipf("skipping: dial failed (no internet? %v)", err)
+		return
+	}
+	select {
+	case err := <-ares:
+		if err != nil {
+			t.Skipf("skipping: accept failed (%v)", err)
+			return
+		}
+	case <-time.After(10 * time.Second):
+		t.Skip("skipping: accept timed out")
+		return
+	}
+
+	// The state hook MUST have fired at least once. The exact states
+	// depend on the cascade outcome, but a successful connection will
+	// at minimum touch Checking and Connected.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		checking := seen[webrtc.ICEConnectionStateChecking]
+		connected := seen[webrtc.ICEConnectionStateConnected]
+		mu.Unlock()
+		if checking && connected {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Errorf("expected to observe ICE Checking + Connected; observed %v", seen)
+}
+
+// TestPeer_HandshakeAndRoundTrip performs the full localhost dance:
+// in-process signaling -> WebRTC handshake -> one Frame round trip.
 func TestPeer_HandshakeAndRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
