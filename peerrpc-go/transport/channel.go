@@ -135,23 +135,30 @@ func New(dc *webrtc.DataChannel) *Channel {
 // exceeds BufferedAmountHigh, it blocks until OnBufferedAmountLow fires
 // (or ctx is canceled, or the channel closes).
 func (c *Channel) SendFrame(ctx context.Context, frame proto.Message) error {
+	payload, err := proto.Marshal(frame)
+	if err != nil {
+		return fmt.Errorf("transport: marshal: %w", err)
+	}
+	return c.SendRaw(ctx, payload)
+}
+
+// SendRaw writes pre-marshaled bytes verbatim through the DataChannel.
+// It is the relay's primitive: the relay forwards frames without
+// inspecting them, so marshaling again would be wasted CPU and would
+// risk non-determinism when the wire payload was produced by another
+// peer's encoder.
+//
+// SendRaw applies the same backpressure as SendFrame.
+func (c *Channel) SendRaw(ctx context.Context, payload []byte) error {
 	select {
 	case <-c.closed:
 		return fmt.Errorf("transport: channel closed: %w", c.closeErr)
 	default:
 	}
 
-	payload, err := proto.Marshal(frame)
-	if err != nil {
-		return fmt.Errorf("transport: marshal: %w", err)
-	}
-
-	// Backpressure: wait if the SCTP buffer is above the high watermark.
 	if err := c.awaitBufferLow(ctx); err != nil {
 		return err
 	}
-
-	// pion's Send is goroutine-safe.
 	if err := c.dc.Send(payload); err != nil {
 		return fmt.Errorf("transport: send: %w", err)
 	}
