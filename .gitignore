@@ -38,3 +38,7 @@ coverage/
 # Go binaries
 *.exe
 peerrpc-echo
+
+# Local binaries
+relay-server/server
+signal-server/server
