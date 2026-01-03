@@ -33,6 +33,15 @@ type ServerStream struct {
 	hdr      *metadataHolder
 	hdrState headerState
 	hdrMu    sync.Mutex
+
+	// incoming is the Call.metadata (the client->server header). It
+	// is read-only from the handler's perspective; observability
+	// interceptors extract trace context from it via IncomingHeader.
+	incoming *peerrpcpb.Metadata
+
+	// ctxMu guards ctx against replacement by interceptors that need
+	// to extend the handler's context (e.g. attach an OTel span).
+	ctxMu sync.Mutex
 }
 
 // headerState tracks whether the Begin frame has been flushed yet so
@@ -55,8 +64,24 @@ func newServerStream(ctx context.Context, method string, mux *multiplexer, seq i
 	}
 }
 
-// Context exposes the per-RPC context.
-func (s *ServerStream) Context() context.Context { return s.ctx }
+// Context exposes the per-RPC context. Stream interceptors that
+// attach additional values (e.g. an OTel span) replace the context
+// via WithContext before calling next.
+func (s *ServerStream) Context() context.Context {
+	s.ctxMu.Lock()
+	defer s.ctxMu.Unlock()
+	return s.ctx
+}
+
+// WithContext replaces the per-RPC context. Stream interceptors use
+// it to attach tracing spans, request-scoped loggers, etc. The
+// replacement ctx MUST derive from the original (cancel propagation,
+// deadline) — typically via context.WithValue(s.Context(), ...).
+func (s *ServerStream) WithContext(ctx context.Context) {
+	s.ctxMu.Lock()
+	defer s.ctxMu.Unlock()
+	s.ctx = ctx
+}
 
 // Method returns the fully-qualified method path.
 func (s *ServerStream) Method() string { return s.method }
@@ -127,7 +152,27 @@ func (s *ServerStream) SetTrailer(kv map[string][]string) {
 
 // Header / Trailer return snapshots of the outgoing header / trailer.
 // Used by interceptors and tests.
+//
+// NOTE: this is the OUTGOING header (set by SetHeader). For the
+// INCOMING header (set by the client via Call.metadata) use
+// IncomingHeader.
 func (s *ServerStream) Header() map[string][]string { return s.hdr.Header() }
+
+// IncomingHeader returns a snapshot of the metadata the client sent
+// in its Call frame. Observability interceptors use this to extract
+// trace context; auth interceptors can use it to inspect per-call
+// credentials.
+func (s *ServerStream) IncomingHeader() map[string][]string {
+	out := map[string][]string{}
+	if s.incoming == nil {
+		return out
+	}
+	for k, vs := range s.incoming.Md {
+		out[k] = append([]string(nil), vs.Values...)
+	}
+	return out
+}
+
 func (s *ServerStream) Trailer() map[string][]string { return s.hdr.Trailer() }
 
 // metadataHolder holds one direction's metadata with thread-safety.

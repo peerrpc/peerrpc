@@ -182,6 +182,11 @@ func (m *multiplexer) openStream(ctx context.Context, s *Server, seq int, call *
 	}
 
 	stream := newServerStream(streamCtx, call.Method, m, seq)
+	// Capture the incoming Call.metadata so interceptors (logging,
+	// tracing, auth) can read it via ServerStream.IncomingHeader.
+	if call.Metadata != nil {
+		stream.incoming = call.Metadata
+	}
 	state := &streamState{method: method, stream: stream, cancel: cancel}
 
 	m.mu.Lock()
