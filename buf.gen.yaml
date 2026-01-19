@@ -15,13 +15,13 @@ plugins:
     out: peerrpc-ts/packages/peerrpc-protocol/src/gen
     opt:
       - target=ts
-      - import_extension=js
+      - import_extension=.js
   # TypeScript: Connect-ES clients (@connectrpc/connect).
   - remote: buf.build/connectrpc/es:v1.4.0
     out: peerrpc-ts/packages/peerrpc-protocol/src/gen
     opt:
       - target=ts
-      - import_extension=js
+      - import_extension=.js
   # Rust: prost-based runtime.
   - remote: buf.build/community/neoeinstein-prost:v0.3.1
     out: peerrpc-rs/gen

@@ -1,0 +1,20 @@
+{
+  "name": "@peerrpc/protocol",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./gen": {
+      "import": "./src/gen/index.js",
+      "types": "./src/gen/index.d.ts"
+    }
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^1.10.0"
+  }
+}
