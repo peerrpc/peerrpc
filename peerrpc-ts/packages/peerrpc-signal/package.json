@@ -1,0 +1,11 @@
+{
+  "name": "@peerrpc/signal",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@peerrpc/protocol": "*",
+    "@connectrpc/connect-web": "^1.4.0"
+  }
+}
