@@ -41,4 +41,4 @@ peerrpc-echo
 
 # Local binaries
 relay-server/server
-signal-server/server
+signal-server/serverbin/

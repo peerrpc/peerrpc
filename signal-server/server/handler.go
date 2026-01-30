@@ -155,8 +155,9 @@ func (h *Handler) Exchange(ctx context.Context, stream *connect.BidiStream[signa
 	for {
 		msg, err := guard.receive(stream)
 		if err != nil {
-			// EOF: client closed cleanly. Wait for the send pump to
-			// drain so we don't return while connect is mid-write.
+			// EOF or transport error: client closed or ctx canceled.
+			// Leave the room so the send pump exits; drain the pump.
+			_ = h.store.Leave(context.Background(), peer)
 			<-sendDone
 			select {
 			case e := <-sendErr:
