@@ -3,18 +3,20 @@
  * over WebRTC.
  *
  * Flow:
- *   1. User enters the signal-server URL and room id.
- *   2. The browser joins the signal room as Answerer.
- *   3. The Go server joins as Offerer and creates a DataChannel.
- *   4. On DataChannel open, the browser issues Unary + Server
- *      Streaming RPCs against the Go server's EchoService.
- *
- * The demo uses the in-process signal-server (or a standalone one)
- * and the native RTCPeerConnection API.
+ *   1. Page loads; user clicks "Connect".
+ *   2. Browser opens a Connect bidi stream to /Exchange on the same
+ *      origin and joins room "interop" as Answerer.
+ *   3. Go server (Offerer) creates a DataChannel; its SDP offer
+ *      arrives via the signaling stream.
+ *   4. Browser creates an RTCPeerConnection, sets the remote offer,
+ *      generates an answer, and sends it back.
+ *   5. ICE candidates are exchanged bidirectionally.
+ *   6. On DataChannel open, the browser issues Unary + Server
+ *      Streaming RPCs against the Go EchoService.
  */
 
 import { Peer } from "@peerrpc/peer";
-import { Client, Code } from "@peerrpc/rpc";
+import { Client, Code, type Status } from "@peerrpc/rpc";
 
 // --- DOM helpers --------------------------------------------------
 
@@ -29,95 +31,270 @@ function setStatus(text: string, cls: string): void {
   statusEl.className = `status ${cls}`;
 }
 
-// --- Signaling -----------------------------------------------------
+// --- Connect protocol signaling over fetch -------------------------
 //
-// The browser-side signaling uses raw fetch() against the
-// signal-server's Connect-protocol Exchange RPC. A full
-// implementation would use @connectrpc/connect-web; this demo
-// keeps the dependency footprint minimal by speaking the Connect
-// unary-over-HTTP framing directly.
-//
-// For the demo we assume the signal-server is running locally
-// with --auth-static or no auth. Production deployments pass a
-// JWT via --jwt-secret and the browser carries it in
-// Authorization.
+// The browser talks to the Go signal-server via the Connect protocol's
+// streaming endpoint. The simplest browser-compatible approach is a
+// fetch() POST with a streaming request body + streaming response.
+// Connect uses enveloped framing (1 byte flags + 4 bytes length +
+// payload); we wrap each SignalMessage in that envelope.
 
-interface PeerSignalSession {
-  close(): void;
+const CONNECT_ENVELOPE_FLAGS = 0x00; // no compression
+
+function encodeConnectEnvelope(payload: Uint8Array): Uint8Array {
+  const out = new Uint8Array(5 + payload.length);
+  const view = new DataView(out.buffer);
+  view.setUint8(0, CONNECT_ENVELOPE_FLAGS);
+  view.setUint32(1, payload.length, false); // big-endian
+  out.set(payload, 5);
+  return out;
 }
 
-async function joinSignalRoom(
-  url: string,
-  roomId: string,
-  peerId: string
-): Promise<{
-  sendOffer: (sdp: string) => void;
-  sendCandidate: (c: string) => void;
-  onAnswer: (cb: (sdp: string) => void) => void;
-  onCandidate: (cb: (c: string) => void) => void;
-  close: () => void;
-}> {
-  // Minimal connect-web style bidi stream over fetch + ReadableStream.
-  // In production use @connectrpc/connect-web; here we do a lightweight
-  // version that's enough for the demo.
-  //
-  // For the simplest localhost demo, we'll use a polling approach
-  // against a hypothetical signaling endpoint. The real signal-server
-  // exposes a bidi stream; the browser demo would need
-  // @connectrpc/connect-web to speak it.
-  //
-  // Given the complexity of raw connect-web bidi framing in browser
-  // fetch, this demo falls back to the simplest path: both sides run
-  // in the same browser tab and the "signaling" is in-memory.
-
-  throw new Error(
-    "signal: this demo requires a running signal-server with connect-web support. " +
-      "Run the Go echo demo server (examples/go/echo) which embeds an in-process " +
-      "signal backend, then point this browser at it."
-  );
+function tryDecodeConnectEnvelope(buf: Uint8Array): { payload: Uint8Array; consumed: number } | null {
+  if (buf.length < 5) return null;
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const len = view.getUint32(1, false);
+  if (buf.length < 5 + len) return null;
+  return { payload: buf.subarray(5, 5 + len), consumed: 5 + len };
 }
+
+/**
+ * SignalSession wraps the Connect bidi stream into a simple
+ * send / onMessage interface.
+ */
+class SignalSession {
+  private writable: WritableStreamDefaultWriter<Uint8Array>;
+  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private inboundBuf: Uint8Array = new Uint8Array(0);
+  private onMessageCb: ((payload: Uint8Array) => void) | null = null;
+  private abortController: AbortController;
+
+  constructor(
+    writable: WritableStreamDefaultWriter<Uint8Array>,
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    abortController: AbortController
+  ) {
+    this.writable = writable;
+    this.reader = reader;
+    this.abortController = abortController;
+    this.startPump();
+  }
+
+  onMessage(cb: (payload: Uint8Array) => void): void {
+    this.onMessageCb = cb;
+  }
+
+  async send(payload: Uint8Array): Promise<void> {
+    const env = encodeConnectEnvelope(payload);
+    await this.writable.write(env);
+  }
+
+  close(): void {
+    this.abortController.abort();
+  }
+
+  private async startPump(): Promise<void> {
+    try {
+      for (;;) {
+        const { done, value } = await this.reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        // Append to buffer.
+        const merged = new Uint8Array(this.inboundBuf.length + value.length);
+        merged.set(this.inboundBuf, 0);
+        merged.set(value, this.inboundBuf.length);
+        this.inboundBuf = merged;
+
+        // Decode envelopes.
+        for (;;) {
+          const result = tryDecodeConnectEnvelope(this.inboundBuf);
+          if (result === null) break;
+          this.inboundBuf = this.inboundBuf.subarray(result.consumed);
+          if (this.onMessageCb) {
+            this.onMessageCb(result.payload);
+          }
+        }
+      }
+    } catch {
+      // stream closed
+    }
+  }
+}
+
+async function openSignalStream(url: string): Promise<SignalSession> {
+  const abortController = new AbortController();
+
+  // Use a TransformStream as the request body so we can write
+  // incrementally.
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+
+  const resp = await fetch(`${url}/peerrpc.signaling.v1.SignalingService/Exchange`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/connect+proto",
+      "Connect-Protocol-Version": "1",
+    },
+    body: readable,
+    signal: abortController.signal,
+  });
+
+  if (!resp.ok || !resp.body) {
+    throw new Error(`signaling HTTP ${resp.status}`);
+  }
+
+  const reader = resp.body.getReader();
+  return new SignalSession(writer, reader, abortController);
+}
+
+// --- Protobuf encode/decode for SignalMessage ----------------------
+//
+// We use the generated protobuf types from @peerrpc/protocol to
+// marshal SignalMessage payloads. The Connect envelope wraps these
+// payloads.
+
+import {
+  SignalMessage as WireSignalMessage,
+} from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_pb.js";
+import {
+  SignalingService,
+} from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_pb.js";
 
 // --- Main flow -----------------------------------------------------
 
 const connectBtn = $<HTMLButtonElement>("connect-btn");
-const signalUrlInput = $<HTMLInputElement>("signal-url");
-const roomIdInput = $<HTMLInputElement>("room-id");
 
 let client: Client | null = null;
-let peer: Peer | null = null;
+let signalSession: SignalSession | null = null;
 
 connectBtn.addEventListener("click", async () => {
   connectBtn.disabled = true;
   setStatus("Connecting...", "connecting");
 
   try {
-    // In a full deployment, this is where we'd call joinSignalRoom
-    // to get a signaling session, then use Peer.createOffer /
-    // acceptOffer + the session to exchange SDP.
-    //
-    // For the localhost demo, the Go echo server already handles the
-    // signaling side. The browser client would typically be loaded
-    // FROM the Go server's embedded static files, and the signaling
-    // would be transparent.
-
-    // Placeholder: show a message explaining the demo flow.
-    setStatus(
-      "Demo mode: this browser client is a UI scaffold. " +
-        "To run the full Go <-> TS interop demo, start the Go echo " +
-        "server and open it in the browser; it serves this page and " +
-        "handles signaling via its embedded signal backend.",
-      "idle"
-    );
+    await connect();
+    setStatus("Connected", "connected");
     rpcSection.style.display = "block";
-
-    // Wire up the Unary + Streaming buttons to no-op stubs that
-    // explain what would happen.
     wireButtons();
   } catch (err) {
     setStatus(`Error: ${err}`, "error");
     connectBtn.disabled = false;
   }
 });
+
+async function connect(): Promise<void> {
+  // 1. Open signaling stream.
+  signalSession = await openSignalStream("");
+
+  // 2. Send Join message.
+  const joinMsg = new WireSignalMessage({
+    roomId: "interop",
+    body: {
+      case: "join",
+      value: { peerId: "browser-" + Date.now(), role: 2 /* ANSWERER */ },
+    },
+  });
+  await signalSession.send(joinMsg.toBinary());
+
+  // 3. Create PeerConnection.
+  const pc = new RTCPeerConnection();
+
+  // 4. Pump signaling messages.
+  const pendingCandidates: RTCIceCandidateInit[] = [];
+  let remoteDescSet = false;
+
+  signalSession.onMessage((payload) => {
+    const msg = new WireSignalMessage().fromBinary(payload);
+    switch (msg.body.case) {
+      case "offer": {
+        pc.setRemoteDescription({ type: "offer", sdp: msg.body.value.sdp })
+          .then(async () => {
+            remoteDescSet = true;
+            // Flush buffered candidates.
+            for (const c of pendingCandidates) {
+              await pc.addIceCandidate(c);
+            }
+            // Create answer.
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            // Wait for ICE gathering.
+            await waitForIceGathering(pc);
+
+            const ansMsg = new WireSignalMessage({
+              roomId: "interop",
+              body: {
+                case: "answer",
+                value: { sdp: pc.localDescription!.sdp },
+              },
+            });
+            await signalSession!.send(ansMsg.toBinary());
+          })
+          .catch((err) => setStatus(`Offer error: ${err}`, "error"));
+        break;
+      }
+      case "candidate": {
+        const c: RTCIceCandidateInit = {
+          candidate: msg.body.value.candidate,
+          sdpMid: msg.body.value.sdpMid || null,
+          sdpMLineIndex: msg.body.value.sdpMLineIndex ?? null,
+        };
+        if (remoteDescSet) {
+          pc.addIceCandidate(c).catch(() => {});
+        } else {
+          pendingCandidates.push(c);
+        }
+        break;
+      }
+    }
+  });
+
+  // 5. Forward local ICE candidates.
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate && signalSession) {
+      const candMsg = new WireSignalMessage({
+        roomId: "interop",
+        body: {
+          case: "candidate",
+          value: {
+            candidate: ev.candidate.candidate,
+            sdpMid: ev.candidate.sdpMid,
+            sdpMLineIndex: ev.candidate.sdpMLineIndex ?? 0,
+          },
+        },
+      });
+      signalSession.send(candMsg.toBinary()).catch(() => {});
+    }
+  };
+
+  // 6. Wait for DataChannel (Go server creates it).
+  const channel = await new Promise<RTCDataChannel>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("DataChannel timeout")), 30000);
+    pc.ondatachannel = (ev) => {
+      clearTimeout(timeout);
+      ev.channel.onopen = () => resolve(ev.channel);
+    };
+  });
+
+  // 7. Wrap into transport.Channel + rpc.Client.
+  const { Channel } = await import("@peerrpc/transport");
+  const transport = new Channel(channel);
+  client = new Client(transport);
+}
+
+function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === "complete") return Promise.resolve();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", check);
+        resolve();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", check);
+    setTimeout(resolve, 5000);
+  });
+}
 
 function wireButtons(): void {
   const unaryBtn = $<HTMLButtonElement>("unary-btn");
@@ -126,18 +303,26 @@ function wireButtons(): void {
 
   unaryBtn.addEventListener("click", async () => {
     if (!client) {
-      unaryOutput.textContent =
-        "Client not connected. Start the Go echo server and connect first.";
+      unaryOutput.textContent = "Not connected";
       return;
     }
-    // In a real demo this would call:
-    //   const { response, status } = await client.invokeUnary(
-    //     "/echo.Echo/Echo",
-    //     new TextEncoder().encode(unaryInput.value),
-    //   );
-    unaryOutput.textContent =
-      `[Would call /echo.Echo/Echo with "${unaryInput.value}"]\n` +
-      `Waiting for Go server integration to complete the round trip.`;
+    unaryBtn.disabled = true;
+    try {
+      const { response, status } = await client.invokeUnary(
+        "/echo.Echo/Echo",
+        new TextEncoder().encode(unaryInput.value)
+      );
+      if (status.code === 0) {
+        unaryOutput.textContent =
+          `Response: ${new TextDecoder().decode(response)}\n` +
+          `Header: ${JSON.stringify(client["ch"] ?? {})}`;
+      } else {
+        unaryOutput.textContent = `Error: ${status.code} ${status.message}`;
+      }
+    } catch (err) {
+      unaryOutput.textContent = `Exception: ${err}`;
+    }
+    unaryBtn.disabled = false;
   });
 
   const streamBtn = $<HTMLButtonElement>("stream-btn");
@@ -146,12 +331,26 @@ function wireButtons(): void {
 
   streamBtn.addEventListener("click", async () => {
     if (!client) {
-      streamOutput.textContent =
-        "Client not connected. Start the Go echo server and connect first.";
+      streamOutput.textContent = "Not connected";
       return;
     }
-    streamOutput.textContent =
-      `[Would call /echo.Echo/Stream with "${streamInput.value}"]\n` +
-      `Waiting for Go server integration to complete the round trip.`;
+    streamBtn.disabled = true;
+    streamOutput.textContent = "Receiving chunks...";
+    try {
+      const stream = await client.invokeServerStreaming(
+        "/echo.Echo/Stream",
+        new TextEncoder().encode(streamInput.value)
+      );
+      const lines: string[] = [];
+      for (;;) {
+        const chunk = await stream.recv();
+        if (chunk === null) break;
+        lines.push(new TextDecoder().decode(chunk));
+      }
+      streamOutput.textContent = lines.join("\n");
+    } catch (err) {
+      streamOutput.textContent = `Exception: ${err}`;
+    }
+    streamBtn.disabled = false;
   });
 }
