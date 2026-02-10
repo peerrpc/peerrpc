@@ -305,7 +305,13 @@ export class Client {
     stream: StreamState
   ): Promise<{ response: Uint8Array; status: Status }> {
     return new Promise((resolve) => {
-      stream.resolveEnd = (s) => resolve({ response: new Uint8Array(0), status: s });
+      const resolveWithInbound = (s: Status) => {
+        const resp = stream.inbound.length > 0
+          ? stream.inbound[0]
+          : new Uint8Array(0);
+        resolve({ response: resp, status: s });
+      };
+      stream.resolveEnd = resolveWithInbound;
       // Check if response already arrived (race with End).
       const check = () => {
         if (stream.inbound.length > 0) {

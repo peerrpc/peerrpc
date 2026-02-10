@@ -125,21 +125,30 @@ func New(dc *webrtc.DataChannel) *Channel {
 	return c
 }
 
-// SendFrame marshals frame and writes it through the DataChannel.
-// Large messages are NOT split here — SendFrame expects frame to
-// already contain a Frame/ResponseFrame with a small inline payload
-// or a single Data.message. Chunking of very large RPC payloads is
-// done in the rpc layer where sequence numbers are allocated.
+// SendFrame marshals frame and writes it through the DataChannel
+// with a length prefix matching the wire protocol. The frame format is:
 //
-// SendFrame applies backpressure: when the DataChannel buffered amount
-// exceeds BufferedAmountHigh, it blocks until OnBufferedAmountLow fires
-// (or ctx is canceled, or the channel closes).
+//	uint32 BE length | protobuf payload
+//
+// This MUST match the TS transport's encoding so both sides can
+// interoperate.
 func (c *Channel) SendFrame(ctx context.Context, frame proto.Message) error {
 	payload, err := proto.Marshal(frame)
 	if err != nil {
 		return fmt.Errorf("transport: marshal: %w", err)
 	}
-	return c.SendRaw(ctx, payload)
+	return c.SendRaw(ctx, lengthPrefix(payload))
+}
+
+// lengthPrefix prepends a 4-byte big-endian length to payload.
+func lengthPrefix(payload []byte) []byte {
+	out := make([]byte, 4+len(payload))
+	out[0] = byte(len(payload) >> 24)
+	out[1] = byte(len(payload) >> 16)
+	out[2] = byte(len(payload) >> 8)
+	out[3] = byte(len(payload))
+	copy(out[4:], payload)
+	return out
 }
 
 // SendRaw writes pre-marshaled bytes verbatim through the DataChannel.
@@ -193,18 +202,34 @@ func (c *Channel) awaitBufferLow(ctx context.Context) error {
 	}
 }
 
-// Recv returns the next raw payload bytes off the DataChannel.
-// It blocks until a message arrives, the channel closes, or ctx is
-// canceled. Returned bytes are valid only until the next Recv call.
+// Recv returns the next decoded frame payload (with the length prefix
+// stripped) off the DataChannel. It blocks until a message arrives,
+// the channel closes, or ctx is canceled.
 func (c *Channel) Recv(ctx context.Context) ([]byte, error) {
 	select {
 	case b := <-c.recv:
-		return b, nil
+		return stripLengthPrefix(b), nil
 	case <-c.closed:
 		return nil, fmt.Errorf("transport: channel closed: %w", c.closeErr)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// stripLengthPrefix removes the 4-byte big-endian length prefix from
+// an inbound DataChannel message. If the message is too short or the
+// prefix claims a different size, the raw bytes are returned as-is
+// (backward compatibility with raw-proto senders).
+func stripLengthPrefix(b []byte) []byte {
+	if len(b) < 4 {
+		return b
+	}
+	length := int(b[0])<<24 | int(b[1])<<16 | int(b[2])<<8 | int(b[3])
+	if length <= 0 || 4+length > len(b) {
+		// Not a valid length-prefixed message; return raw.
+		return b
+	}
+	return b[4 : 4+length]
 }
 
 // Closed returns a channel that is closed when the underlying
