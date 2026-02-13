@@ -40,12 +40,16 @@ import (
 func main() {
 	addr := flag.String("addr", ":3000", "listen address")
 	staticDir := flag.String("static", "", "path to the TS demo's dist/ directory")
+	tlsCert := flag.String("tls-cert", "", "path to TLS certificate (enables HTTPS for browser Connect streaming)")
+	tlsKey := flag.String("tls-key", "", "path to TLS private key")
+	autoTLS := flag.Bool("auto-tls", false, "generate an ephemeral self-signed cert at startup (for dev/testing)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	// 1. In-process signaling backend.
+	// 1. In-process signaling backend + SSE hub for browser signaling.
 	backend := signalsdk.NewLocal()
+	hub := newSignalHub(backend, logger)
 
 	// 2. EchoService registration.
 	srv := rpc.NewServer()
@@ -104,26 +108,58 @@ func main() {
 		logger.Info("serving static files", "dir", *staticDir)
 	}
 
+	// SSE + POST signaling endpoints for the browser.
+	mux.HandleFunc("/api/signal/events", hub.handleSSE)
+	mux.HandleFunc("/api/signal/send", hub.handleSend)
+
+	// 4. Launch the PeerRPC Offerer in the background. It joins room
+	//    "interop" and waits for the browser Answerer. Signaling flows
+	//    through the SSE hub: the browser subscribes to /api/signal/events,
+	//    POSTs its answer/ICE to /api/signal/send, and the offerer
+	//    broadcasts its offer/ICE via the SSE stream.
+	go func() {
+		if err := runOfferer(context.Background(), backend, hub, srv, logger); err != nil {
+			logger.Error("offerer exited", "err", err)
+		}
+	}()
+
+	// Resolve TLS config. --auto-tls generates an ephemeral cert for
+	// dev/testing so the binary is self-contained.
+	if *autoTLS && (*tlsCert == "" || *tlsKey == "") {
+		cert, key, err := generateSelfSignedCert()
+		if err != nil {
+			logger.Error("auto-tls cert generation", "err", err)
+			os.Exit(1)
+		}
+		*tlsCert = cert
+		*tlsKey = key
+		logger.Info("auto-TLS: generated ephemeral self-signed certificate")
+	}
+
+	// 5. Start HTTP server. Connect bidi streaming requires HTTP/2;
+	//    Chrome only does HTTP/2 over TLS, so use ListenAndServeTLS
+	//    when cert+key are provided. Otherwise fall back to h2c (works
+	//    for non-browser clients like connect-go).
 	httpSrv := &http.Server{
 		Addr:    *addr,
 		Handler: h2c.NewHandler(mux, &http2.Server{}),
 	}
 
-	// 4. Launch the PeerRPC Offerer in the background. It joins room
-	//    "interop" and waits for the browser Answerer.
-	go func() {
-		if err := runOfferer(context.Background(), backend, srv, logger); err != nil {
-			logger.Error("offerer exited", "err", err)
-		}
-	}()
-
-	// 5. Start HTTP server.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		logger.Info("interop server listening", "addr", *addr)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Info("interop server listening",
+			"addr", *addr,
+			"tls", *tlsCert != "",
+		)
+		var err error
+		if *tlsCert != "" && *tlsKey != "" {
+			err = httpSrv.ListenAndServeTLS(*tlsCert, *tlsKey)
+		} else {
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			logger.Error("ListenAndServe", "err", err)
 			os.Exit(1)
 		}
@@ -138,14 +174,34 @@ func main() {
 
 // runOfferer joins the signaling room as Offerer, waits for the
 // browser Answerer, creates a DataChannel, and serves the EchoService
-// on it. If the browser disconnects, it loops and waits for the next
-// connection.
-func runOfferer(ctx context.Context, backend signalsdk.Backend, srv *rpc.Server, logger *slog.Logger) error {
+// on it. Signaling flows through the SSE hub: the offerer broadcasts
+// its SDP offer + ICE candidates via the SSE stream, and reads the
+// browser's answer + ICE candidates from the SSE POST endpoint.
+func runOfferer(ctx context.Context, backend signalsdk.Backend, hub *signalHub, srv *rpc.Server, logger *slog.Logger) error {
 	peerID := "go-offerer-" + randomID()
 	for {
 		sig, err := backend.Exchange(ctx, "interop", peerID)
 		if err != nil {
 			return fmt.Errorf("signaling exchange: %w", err)
+		}
+
+		// The Go offerer sends its SDP offer + ICE candidates via
+		// sig.Send, which broadcasts to the "browser" virtual peer
+		// created by handleSSE. The browser sends its answer + ICE
+		// via POST, which handleSend injects into the backend via
+		// the browser session's Send. The offerer receives them
+		// through its own sig.Receive.
+
+		// Wait for the browser to join the room via SSE before creating
+		// the offer. Without this the offer is broadcast before the
+		// browser session exists and is lost.
+		select {
+		case <-hub.waitForBrowser("interop"):
+			logger.Info("browser joined signaling room")
+		case <-time.After(60 * time.Second):
+			logger.Warn("timed out waiting for browser")
+			sig.Close()
+			continue
 		}
 
 		p, err := peer.New(ctx, signalsdk.RoleOfferer, peer.Config{
@@ -156,9 +212,6 @@ func runOfferer(ctx context.Context, backend signalsdk.Backend, srv *rpc.Server,
 			return fmt.Errorf("peer.New: %w", err)
 		}
 
-		// Accept is concurrent with Dial; here we Dial because we're
-		// the Offerer. The browser is the Answerer waiting for our
-		// offer via the signaling stream.
 		ch, err := p.Dial(ctx, sig)
 		if err != nil {
 			logger.Warn("offerer Dial failed", "err", err)
@@ -173,6 +226,9 @@ func runOfferer(ctx context.Context, backend signalsdk.Backend, srv *rpc.Server,
 		}
 		p.Close()
 		sig.Close()
+		// Reset the browser-ready channel so the next iteration waits
+		// for a fresh browser connection.
+		hub.resetBrowserReady("interop")
 		logger.Info("DataChannel closed, waiting for next connection")
 	}
 }
