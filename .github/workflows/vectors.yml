@@ -34,7 +34,6 @@ jobs:
         if: github.event_name == 'pull_request'
         working-directory: .
         run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=."
-        continue-on-true: false
 
       - name: buf generate
         run: buf generate
