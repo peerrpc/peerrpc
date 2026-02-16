@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../peerrpc-protocol" },
+    { "path": "../peerrpc-transport" },
+    { "path": "../peerrpc-peer" },
+    { "path": "../peerrpc-rpc" }
+  ]
+}

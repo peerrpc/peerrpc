@@ -18,7 +18,8 @@
     { "path": "packages/peerrpc-transport" },
     { "path": "packages/peerrpc-peer" },
     { "path": "packages/peerrpc-signal" },
-    { "path": "packages/peerrpc-rpc" }
+    { "path": "packages/peerrpc-rpc" },
+    { "path": "packages/peerrpc-react" }
   ],
   "files": []
 }
