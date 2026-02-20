@@ -1,0 +1,50 @@
+name: bench
+
+# Performance regression gate: run Go benchmarks on every PR against
+# main and alert when any benchmark regresses by more than 20%.
+#
+# Results are stored in the `benchmark-data` branch and served via
+# GitHub Pages for historical charts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: peerrpc-go/go.sum
+
+      - name: Run benchmarks
+        working-directory: peerrpc-go
+        run: |
+          go test -bench=. -benchmem -count=5 -timeout 600s ./bench/... | tee bench-output.txt
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'go'
+          output-file-path: peerrpc-go/bench-output.txt
+          benchmark-data-dir-path: 'benchmarks'
+          # Alert on > 20% regression.
+          alert-threshold: '120%'
+          # Comment on the PR when a regression is detected.
+          comment-on-alert: true
+          # Fail the workflow on regression.
+          fail-on-alert: true
+          # Push results to the benchmark-data branch on main pushes.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: ${{ github.event_name == 'push' }}
