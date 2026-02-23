@@ -48,3 +48,6 @@ test/cross-lang/go-ts/interop-ts
 
 # Interop build artifacts
 test/cross-lang/go-ts/.bin/
+
+# Rust
+target/

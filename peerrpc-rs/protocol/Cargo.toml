@@ -1,0 +1,15 @@
+[package]
+name = "peerrpc-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PeerRPC wire protocol: length-prefixed frame codec + generated protobuf types"
+
+[dependencies]
+prost.workspace = true
+prost-types = "0.13"
+bytes.workspace = true
+thiserror.workspace = true
+
+[build-dependencies]
+prost-build = "0.13"

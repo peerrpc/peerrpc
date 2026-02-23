@@ -1,0 +1,13 @@
+[package]
+name = "peerrpc-rpc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PeerRPC client: multiplexed RPC over a transport channel"
+
+[dependencies]
+peerrpc-protocol.workspace = true
+peerrpc-transport.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

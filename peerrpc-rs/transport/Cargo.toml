@@ -1,0 +1,12 @@
+[package]
+name = "peerrpc-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PeerRPC transport: chunk reassembly + backpressure primitives"
+
+[dependencies]
+peerrpc-protocol.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
