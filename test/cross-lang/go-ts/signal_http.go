@@ -213,9 +213,10 @@ func (h *signalHub) handleSSE(w http.ResponseWriter, r *http.Request) {
 	browserSess, ok := h.browserSess[roomID]
 	h.mu.Unlock()
 	if !ok {
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		sess, err := h.backend.Exchange(ctx, roomID, "browser")
+		// Use a background context so the session survives after the
+		// SSE HTTP connection closes. The browser POSTs its answer
+		// later via handleSend, which reuses this session.
+		sess, err := h.backend.Exchange(context.Background(), roomID, "browser")
 		if err != nil {
 			http.Error(w, fmt.Sprintf("signaling join: %v", err), 500)
 			return
@@ -306,24 +307,23 @@ func (h *signalHub) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logger.Info("handleSend received", "type", msg.Type, "room", roomID)
+
 	// Also publish to SSE for any other listeners (e.g. multiple
 	// browser tabs).
 	h.publish(roomID, msg)
 
 	// Forward into the signal backend so the Go offerer picks it up.
-	// Create or reuse a "browser" peer session in the room.
+	// Create or reuse a "browser" peer session. The session may have
+	// been killed when the SSE connection dropped; recreate if needed.
 	h.mu.Lock()
 	sess, ok := h.browserSess[roomID]
 	h.mu.Unlock()
 	if !ok {
-		ctx, cancel := context.WithCancel(r.Context())
+		ctx2, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		newSess, err := h.backend.Exchange(ctx, roomID, "browser")
+		newSess, err := h.backend.Exchange(ctx2, roomID, "browser-post")
 		if err != nil {
-			// Room might be at the 2-peer ceiling (Go offerer + browser).
-			// In that case the browser session was already created when
-			// the Go offerer joined. Try a different approach: just
-			// publish and let the SSE path handle it.
 			w.WriteHeader(http.StatusOK)
 			return
 		}

@@ -1,0 +1,16 @@
+[package]
+name = "peerrpc-peer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PeerRPC peer layer: webrtc-rs PeerConnection + DataChannel adapter"
+
+[dependencies]
+peerrpc-protocol.workspace = true
+peerrpc-rpc = { path = "../rpc" }
+webrtc = "0.11"
+tokio = { workspace = true, features = ["full"] }
+bytes.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+async-trait = "0.1"
