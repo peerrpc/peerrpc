@@ -1,0 +1,36 @@
+# Go
+*.test
+*.out
+dist/
+bin/
+
+# Node / TypeScript
+node_modules/
+**/dist/
+**/build/
+*.tsbuildinfo
+
+# Rust
+target/
+**/target/
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local environment
+.env
+.env.local
+*.local
+
+# Coverage
+coverage/
+*.cover
+.coverprofile
+
+# Buf
+.buf-cache/

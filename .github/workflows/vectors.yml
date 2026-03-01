@@ -1,0 +1,60 @@
+name: vectors
+
+# Phase 0 regression gate: enforce that the golden protocol vectors
+# still decode/encode byte-for-byte and match expected.json.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  golden-vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: peerrpc-go/go.sum
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: buf lint
+        working-directory: .
+        run: buf lint
+
+      - name: buf breaking (against main)
+        if: github.event_name == 'pull_request'
+        working-directory: .
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=."
+        continue-on-true: false
+
+      - name: buf generate
+        run: buf generate
+
+      - name: Verify generated code is in sync
+        run: |
+          if ! git diff --exit-code -- peerrpc-go/gen peerrpc-ts peerrpc-rs/gen; then
+            echo "::error::generated code is stale; run 'buf generate' and commit the result"
+            exit 1
+          fi
+
+      - name: Verify committed vectors match the generator output
+        run: |
+          cd peerrpc-go
+          go run ./cmd/gen-vectors
+          cd ..
+          if ! git diff --exit-code -- test/vectors; then
+            echo "::error::test/vectors is stale; run 'make gen-vectors' and commit the result"
+            exit 1
+          fi
+
+      - name: Run Go regression tests
+        run: cd peerrpc-go && go test ./... -race -count=1
