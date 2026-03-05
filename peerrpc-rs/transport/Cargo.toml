@@ -3,10 +3,14 @@ name = "peerrpc-transport"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PeerRPC transport: chunk reassembly + backpressure primitives"
+description = "PeerRPC transport: DataChannel wrapper, chunk reassembly, backpressure"
 
 [dependencies]
 peerrpc-protocol.workspace = true
 bytes.workspace = true
+prost.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+webrtc = "0.11"
+futures-util = "0.3"
