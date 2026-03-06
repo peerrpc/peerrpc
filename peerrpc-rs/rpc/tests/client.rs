@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use bytes::Bytes;
 use peerrpc_protocol::{
-    encode_response_frame, gen, Begin, Chunk, Data, End, ResponseFrame, Routing,
+    encode_response_frame, gen, Begin, Data, End, ResponseFrame, Routing,
 };
 use peerrpc_protocol::google::rpc::Status as WireStatus;
 use peerrpc_rpc::{Client, WireTransport, RpcError};
@@ -57,6 +57,33 @@ fn make_unary_response(seq: i32, data: &[u8]) -> Vec<Bytes> {
             })),
         }),
     ]
+}
+
+/// Helper: build a ResponseFrame sequence for client streaming:
+/// Begin → Data × N → End.
+fn make_client_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
+    let mut frames = vec![
+        encode_response_frame(&ResponseFrame {
+            routing: Some(Routing { sequence: seq }),
+            r#type: Some(gen::response_frame::Type::Begin(Begin::default())),
+        }),
+    ];
+    for chunk in chunks {
+        frames.push(encode_response_frame(&ResponseFrame {
+            routing: Some(Routing { sequence: seq }),
+            r#type: Some(gen::response_frame::Type::Data(Data {
+                content: Some(gen::data::Content::Message(chunk.clone())),
+            })),
+        }));
+    }
+    frames.push(encode_response_frame(&ResponseFrame {
+        routing: Some(Routing { sequence: seq }),
+        r#type: Some(gen::response_frame::Type::End(End {
+            status: Some(WireStatus { code: 0, message: "".into(), details: vec![] }),
+            ..Default::default()
+        })),
+    }));
+    frames
 }
 
 fn make_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
@@ -239,4 +266,92 @@ async fn test_large_payload_chunking() {
     assert!(status.is_ok());
     // Sent: Call + N chunks + End. At least 3 frames.
     assert!(sent.load(Ordering::SeqCst) >= 3);
+}
+
+#[tokio::test]
+async fn test_invoke_client_streaming() {
+    let inbound = Arc::new(Mutex::new(Vec::<Bytes>::new()));
+    let transport = MockTransport {
+        inbound: inbound.clone(),
+        sent: Arc::new(AtomicUsize::new(0)),
+    };
+    let client = Client::new(transport);
+
+    // Build server response: one concatenated reply.
+    let resp_data = b"received 3 messages (15 bytes)".to_vec();
+    let responses = make_client_streaming_response(1, &[resp_data]);
+    {
+        let mut q = inbound.lock().await;
+        q.extend(responses);
+    }
+
+    let mut stream = client
+        .invoke_client_streaming("/echo.Echo/Collect", Some(b"first"))
+        .await
+        .expect("open client stream");
+
+    // Send additional chunks.
+    stream.send(b"chunk-1").expect("send 1");
+    stream.send(b"chunk-2").expect("send 2");
+    stream.close_send().expect("close_send");
+
+    let resp = stream.recv().await.expect("should have a response");
+    assert_eq!(
+        String::from_utf8_lossy(&resp),
+        "received 3 messages (15 bytes)"
+    );
+
+    // Next recv returns None (EOF).
+    assert!(stream.recv().await.is_none());
+
+    let status = stream.wait_end().await;
+    assert!(status.is_ok());
+}
+
+#[tokio::test]
+async fn test_invoke_bidi_streaming() {
+    let inbound = Arc::new(Mutex::new(Vec::<Bytes>::new()));
+    let transport = MockTransport {
+        inbound: inbound.clone(),
+        sent: Arc::new(AtomicUsize::new(0)),
+    };
+    let client = Client::new(transport);
+
+    // Build a sequence of interleaved responses:
+    // Begin → Data(ack-1) → Data(ack-2) → Data(ack-3) → End
+    let responses = make_client_streaming_response(
+        1,
+        &[
+            b"ack 1: msg-1".to_vec(),
+            b"ack 2: msg-2".to_vec(),
+            b"ack 3: msg-3".to_vec(),
+        ],
+    );
+    {
+        let mut q = inbound.lock().await;
+        q.extend(responses);
+    }
+
+    let mut stream = client
+        .invoke_bidi_streaming("/echo.Echo/Chat")
+        .await
+        .expect("open bidi stream");
+
+    // Interleave send + recv (true bidi pattern).
+    for i in 1..=3 {
+        stream.send(format!("msg-{}", i).as_bytes()).expect("send");
+        let resp = stream.recv().await.expect("should have a response");
+        assert_eq!(
+            String::from_utf8_lossy(&resp),
+            format!("ack {}: msg-{}", i, i)
+        );
+    }
+
+    stream.close_send().expect("close_send");
+
+    // After close_send, recv should return None (EOF).
+    assert!(stream.recv().await.is_none());
+
+    let status = stream.wait_end().await;
+    assert!(status.is_ok());
 }

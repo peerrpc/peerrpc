@@ -7,7 +7,7 @@
 //! webrtc-rs DataChannel adapter; tests use an in-memory mock.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 
 use peerrpc_protocol::{
@@ -123,6 +123,34 @@ impl Client {
         self.open_stream(method, req, true).await
     }
 
+    /// Invoke a client-streaming RPC.
+    ///
+    /// `first_req` is an optional initial payload sent inline with
+    /// the Call frame (≤16KB) or as Data frames. After opening the
+    /// stream the caller may send zero or more messages via
+    /// [`ClientStream::send`], then [`ClientStream::close_send`],
+    /// then [`ClientStream::recv`] for the single response.
+    pub async fn invoke_client_streaming(
+        &self,
+        method: &str,
+        first_req: Option<&[u8]>,
+    ) -> Result<ClientStream, RpcError> {
+        self.open_client_stream(method, first_req).await
+    }
+
+    /// Invoke a bidi-streaming RPC.
+    ///
+    /// Wire shape is identical to client-streaming (Call → Data* →
+    /// End{close_send} → Data* → End{status}); the difference is
+    /// purely in how the application uses recv() — multiple
+    /// responses interleaved with sends.
+    pub async fn invoke_bidi_streaming(
+        &self,
+        method: &str,
+    ) -> Result<ClientStream, RpcError> {
+        self.open_client_stream(method, None).await
+    }
+
     // ─── Internal ───────────────────────────────────────────
 
     async fn open_stream(
@@ -172,6 +200,59 @@ impl Client {
             inbound: inbound_rx,
             end: Some(end_rx),
             streams: self.streams.clone(),
+            outbound: self.outbound.clone(),
+            closed: AtomicBool::new(false),
+        })
+    }
+
+    /// Open a stream without half-closing, for client / bidi streaming.
+    /// Sends the Call frame (optionally with `first_req` inlined) but
+    /// does NOT send `End{close_send}` — the caller drives sends via
+    /// [`ClientStream::send`] and half-close via [`ClientStream::close_send`].
+    async fn open_client_stream(
+        &self,
+        method: &str,
+        first_req: Option<&[u8]>,
+    ) -> Result<ClientStream, RpcError> {
+        let seq = self.seq_alloc.fetch_add(2, Ordering::SeqCst);
+        let (inbound_tx, inbound_rx) = mpsc::channel(16);
+        let (end_tx, end_rx) = tokio::sync::oneshot::channel();
+
+        let mut call = Call {
+            method: method.to_string(),
+            protocol_version: 1,
+            ..Default::default()
+        };
+        if let Some(req) = first_req {
+            if req.len() <= INLINE_MAX {
+                call.inline_data = Some(req.to_vec());
+            }
+        }
+
+        self.send(Frame {
+            routing: Some(Routing { sequence: seq }),
+            r#type: Some(gen::frame::Type::Call(call)),
+        })?;
+
+        if let Some(req) = first_req {
+            if req.len() > INLINE_MAX {
+                self.send_payload(seq, req)?;
+            }
+        }
+
+        // Register stream state so the run loop can dispatch.
+        self.streams.lock().await.insert(seq, StreamState {
+            inbound: inbound_tx,
+            end: Some(end_tx),
+        });
+
+        Ok(ClientStream {
+            seq,
+            inbound: inbound_rx,
+            end: Some(end_rx),
+            streams: self.streams.clone(),
+            outbound: self.outbound.clone(),
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -302,12 +383,21 @@ impl Client {
 
 // ─── ClientStream ────────────────────────────────────────────
 
-/// Per-RPC stream handle returned by `invoke_server_streaming`.
+/// Per-RPC stream handle returned by streaming `invoke_*` methods.
+///
+/// Supports:
+/// - **Server-streaming**: call `recv()` until `None`.
+/// - **Client-streaming**: call `send()` zero or more times, then
+///   `close_send()`, then `recv()` for the single response.
+/// - **Bidi-streaming**: interleave `send()` / `recv()`, then
+///   `close_send()`, then `recv()` until `None`.
 pub struct ClientStream {
     seq: i32,
     inbound: mpsc::Receiver<Vec<u8>>,
     end: Option<tokio::sync::oneshot::Receiver<Status>>,
     streams: Arc<Mutex<HashMap<i32, StreamState>>>,
+    outbound: mpsc::UnboundedSender<bytes::Bytes>,
+    closed: AtomicBool,
 }
 
 impl ClientStream {
@@ -327,12 +417,75 @@ impl ClientStream {
             Status::default()
         }
     }
+
+    /// Send one request message.
+    ///
+    /// Automatically chunks payloads larger than `MESSAGE_MAX`.
+    /// Returns an error if the transport has closed or if
+    /// `close_send` was already called.
+    pub fn send(&self, data: &[u8]) -> Result<(), RpcError> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(RpcError::Other("stream: closed".into()));
+        }
+        self.send_payload(data)
+    }
+
+    /// Half-close: signal the server that no more request messages
+    /// will follow. Safe to call multiple times (idempotent).
+    pub fn close_send(&self) -> Result<(), RpcError> {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return Ok(()); // already closed
+        }
+        self.send_frame(Frame {
+            routing: Some(Routing { sequence: self.seq }),
+            r#type: Some(gen::frame::Type::End(End {
+                close_send: true,
+                ..Default::default()
+            })),
+        })
+    }
+
+    // ─── internal helpers ───────────────────────────────────
+
+    fn send_frame(&self, frame: Frame) -> Result<(), RpcError> {
+        self.outbound
+            .send(encode_frame(&frame))
+            .map_err(|_| RpcError::TransportClosed)
+    }
+
+    fn send_payload(&self, payload: &[u8]) -> Result<(), RpcError> {
+        if payload.len() <= MESSAGE_MAX {
+            return self.send_frame(Frame {
+                routing: Some(Routing { sequence: self.seq }),
+                r#type: Some(gen::frame::Type::Data(Data {
+                    content: Some(gen::data::Content::Message(payload.to_vec())),
+                })),
+            });
+        }
+        for offset in (0..payload.len()).step_by(CHUNK_SIZE) {
+            let end = (offset + CHUNK_SIZE).min(payload.len());
+            self.send_frame(Frame {
+                routing: Some(Routing { sequence: self.seq }),
+                r#type: Some(gen::frame::Type::Data(Data {
+                    content: Some(gen::data::Content::Chunk(Chunk {
+                        total_size: payload.len() as i32,
+                        offset: offset as i32,
+                        data: payload[offset..end].to_vec(),
+                    })),
+                })),
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for ClientStream {
     fn drop(&mut self) {
         // Best-effort: remove the stream entry so the run loop does
-        // not dispatch to a dropped receiver.
+        // not dispatch to a dropped receiver. Also close-send if
+        // the caller hasn't done so (prevents server from waiting
+        // indefinitely on a dropped client).
+        let _ = self.close_send();
         let seq = self.seq;
         let streams = self.streams.clone();
         tokio::spawn(async move {
