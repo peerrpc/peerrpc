@@ -7,9 +7,8 @@
 // the WebRTC data path: any rendezvous mechanism works.
 //
 // Phase 1 ships an in-process backend (`Local`) suitable for tests and
-// single-binary demos. Future phases add connect-go network backends
-// (Cloudflare Workers, standalone Go server) without changing the
-// client surface.
+// single-binary demos. Phase 2 adds a connect-go network backend
+// (`Remote`) for production deployments.
 package signal
 
 import (
@@ -67,8 +66,8 @@ type SdpAnswer struct {
 
 // IceCandidate carries one ICE candidate.
 type IceCandidate struct {
-	Candidate    string
-	SdpMid       string
+	Candidate     string
+	SdpMid        string
 	SdpMLineIndex uint32
 }
 
@@ -101,16 +100,18 @@ type Backend interface {
 }
 
 // Session is a peer's presence in a signaling room.
+//
+// It provides bidirectional communication: Send broadcasts a message
+// to every other peer in the room, Receive returns a channel of
+// incoming messages from other peers.
 type Session struct {
-	backend *Local
 	roomID  string
 	peerID  string
-
-	out chan<- *SignalMessage // outbound to room
-	in  <-chan *SignalMessage // inbound from room
-
-	done chan struct{}
-	once sync.Once
+	out     chan<- *SignalMessage
+	in      <-chan *SignalMessage
+	done    chan struct{}
+	cleanup func() // called by Close to release backend resources
+	once    sync.Once
 }
 
 // Send broadcasts msg to every other peer in the room.
@@ -132,7 +133,9 @@ func (s *Session) Receive() <-chan *SignalMessage { return s.in }
 // Close leaves the room. Safe to call multiple times.
 func (s *Session) Close() error {
 	s.once.Do(func() {
-		s.backend.leave(s.roomID, s.peerID)
+		if s.cleanup != nil {
+			s.cleanup()
+		}
 		close(s.done)
 	})
 	return nil
@@ -187,12 +190,14 @@ func (l *Local) Exchange(ctx context.Context, roomID, peerID string) (*Session, 
 	r.mu.Unlock()
 
 	s := &Session{
-		backend: l,
-		roomID:  roomID,
-		peerID:  peerID,
-		out:     out,
-		in:      in,
-		done:    make(chan struct{}),
+		roomID: roomID,
+		peerID: peerID,
+		out:    out,
+		in:     in,
+		done:   make(chan struct{}),
+		cleanup: func() {
+			l.leave(roomID, peerID)
+		},
 	}
 
 	// Pump outbound messages from this peer into every other peer's
