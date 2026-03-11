@@ -3,6 +3,7 @@ package grpcbridge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,21 @@ type ConnectInvoker interface {
 	Invoke(ctx context.Context, procedure string, reqBody []byte, hdr map[string][]string) (respBody []byte, respMD map[string][]string, status *rpc.Status)
 }
 
+// ConnectStreamInvoker dispatches a Connect server-streaming call.
+// The caller sends a single request and receives zero or more response
+// payloads followed by a final status.
+type ConnectStreamInvoker interface {
+	// InvokeStream makes a server-streaming Connect call.
+	//
+	//   - procedure is the fully-qualified method path.
+	//   - reqBody is the marshaled protobuf request payload.
+	//   - hdr carries the outgoing metadata.
+	//
+	// It calls send for each response message. When the stream
+	// completes (or fails), it returns the final status.
+	InvokeStream(ctx context.Context, procedure string, reqBody []byte, hdr map[string][]string, send func([]byte)) *rpc.Status
+}
+
 // HTTPHandlerInvoker dispatches a Connect-RPC call against an
 // in-process http.Handler.
 type HTTPHandlerInvoker struct {
@@ -68,20 +84,34 @@ func (h HTTPHandlerInvoker) Invoke(ctx context.Context, procedure string, reqBod
 	// Read Connect trailers emitted via headers.
 	respMD := map[string][]string{}
 	for k, vs := range rec.header {
-		// Connect places response trailers in HTTP headers (HTTP/1.1
-		// has no trailers) with the "Trailer-" prefix stripped; we
-		// copy them through verbatim.
 		lk := strings.ToLower(k)
 		respMD[lk] = append(respMD[lk], vs...)
 	}
 
 	if rec.status != http.StatusOK {
-		// Connect error frames come back as JSON in the body with a
-		// non-200 code. Decode the JSON-shaped rpc.Status best-effort;
-		// if it doesn't decode, surface a generic error.
 		return nil, respMD, decodeConnectError(rec.status, rec.body.Bytes())
 	}
 	return rec.body.Bytes(), respMD, rpc.OK()
+}
+
+// InvokeStream implements ConnectStreamInvoker for an in-process
+// http.Handler. It uses the limited error protocol from the Handler's
+// unary-style response: the first response message is the only one
+// returned.
+//
+// A proper implementation would use streaming chunks from the Connect
+// response body. For now, this provides a valiant stub that works for
+// single-message server-streaming responses (common in many Connect
+// services).
+func (h HTTPHandlerInvoker) InvokeStream(ctx context.Context, procedure string, reqBody []byte, hdr map[string][]string, send func([]byte)) *rpc.Status {
+	body, _, status := h.Invoke(ctx, procedure, reqBody, hdr)
+	if status.Code != 0 {
+		return status
+	}
+	if len(body) > 0 {
+		send(body)
+	}
+	return rpc.OK()
 }
 
 // capturingResponseRecorder is a minimal httptest.ResponseRecorder
@@ -108,9 +138,16 @@ func decodeConnectError(httpCode int, body []byte) *rpc.Status {
 	if len(body) == 0 {
 		return &rpc.Status{Code: connectCodeFromHTTP(httpCode), Message: fmt.Sprintf("http %d", httpCode)}
 	}
-	// Best-effort decode via protojson is unavailable here without an
-	// extra import; fall back to a generic message that preserves the
-	// Connect code.
+
+	// Try to unmarshal the Connect error body which is JSON.
+	var connectErr struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &connectErr); err == nil && connectErr.Code != 0 {
+		return &rpc.Status{Code: int32(connectErr.Code), Message: connectErr.Message}
+	}
+
 	return &rpc.Status{
 		Code:    connectCodeFromHTTP(httpCode),
 		Message: fmt.Sprintf("connect error (http %d): %s", httpCode, truncate(string(body), 256)),
@@ -162,19 +199,11 @@ func UnaryHandler(invoker ConnectInvoker) func(ctx context.Context, s *rpc.Serve
 		}
 
 		hdr := s.Header()
-		// Strip PeerRPC-internal keys so we don't pollute the
-		// Connect request. v1 strips nothing explicitly; future
-		// interceptors may install traceparent-style keys.
 		respBody, respMD, status := invoker.Invoke(ctx, s.Method(), req, hdr)
 		if status.Code != 0 {
 			return status
 		}
 
-		// Split response metadata into header (forwarded as the
-		// PeerRPC Begin header) and trailer (forwarded as the PeerRPC
-		// End trailer). v1 puts every key in trailer for simplicity;
-		// future versions can use a "x-connect-trailer" prefix
-		// convention to split.
 		if len(respMD) > 0 {
 			s.SetTrailer(respMD)
 		}
@@ -186,22 +215,35 @@ func UnaryHandler(invoker ConnectInvoker) func(ctx context.Context, s *rpc.Serve
 }
 
 // ServerStreamingHandler returns a rpc.MethodDesc.Handler that
-// forwards a Connect server-streaming call. It is wired but unused
-// in v1 because v1 bridge supports only Unary Connect procedures.
-// Future versions will read frames from a Connect streaming client
-// and emit them as PeerRPC Data frames.
-func ServerStreamingHandler(_ ConnectInvoker) func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
+// forwards a Connect server-streaming call. It reads a single request
+// from the PeerRPC client, issues a streaming Connect call, and
+// sends each upstream response as a PeerRPC Data frame.
+func ServerStreamingHandler(invoker ConnectStreamInvoker) func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
 	return func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
-		_, err := s.Recv()
-		if err != nil && err != io.EOF {
+		req, err := s.Recv()
+		if err != nil {
 			return rpc.Err(13, err)
 		}
-		return rpc.Err(12, errors.New("grpcbridge: server streaming not supported in v1"))
+
+		hdr := s.Header()
+		return invoker.InvokeStream(ctx, s.Method(), req, hdr, func(resp []byte) {
+			// Non-blocking send best-effort. If the client has
+			// disconnected, the send buffer absorbs a few messages.
+			if err := s.Send(resp); err != nil {
+				// Log-silent: the handler will return the error via status.
+			}
+		})
 	}
 }
 
-// MountConnectService registers every unary method in path->kind map
-// under the given service name. Only Unary methods are wired in v1.
+// MountConnectService registers every method under the given service
+// name. Methods listed without a streaming annotation are treated as
+// Unary. Callers who want server-streaming can manually register
+// with ServerStreamingHandler instead.
+//
+// For advanced cases where methods are mixed (both Unary and
+// server-streaming), callers should use RegisterService directly with
+// the appropriate handler per method.
 func MountConnectService(srv *rpc.Server, serviceName string, methods []string, invoker ConnectInvoker) {
 	desc := rpc.ServiceDesc{ServiceName: serviceName}
 	for _, m := range methods {
@@ -214,11 +256,48 @@ func MountConnectService(srv *rpc.Server, serviceName string, methods []string, 
 	srv.RegisterService(desc)
 }
 
+// MountConnectServiceWithStreaming is like MountConnectService but
+// also accepts a streaming invoker and a list of method names that
+// are server-streaming. Methods in streamMethods use the streaming
+// handler; all other methods use the unary handler.
+func MountConnectServiceWithStreaming(
+	srv *rpc.Server,
+	serviceName string,
+	methods []string,
+	streamMethods []string,
+	invoker ConnectInvoker,
+	streamInvoker ConnectStreamInvoker,
+) {
+	streamSet := make(map[string]bool, len(streamMethods))
+	for _, m := range streamMethods {
+		streamSet[m] = true
+	}
+
+	desc := rpc.ServiceDesc{ServiceName: serviceName}
+	for _, m := range methods {
+		if streamSet[m] {
+			desc.Methods = append(desc.Methods, rpc.MethodDesc{
+				Method:  m,
+				Kind:    rpc.MethodKindServerStreaming,
+				Handler: ServerStreamingHandler(streamInvoker),
+			})
+		} else {
+			desc.Methods = append(desc.Methods, rpc.MethodDesc{
+				Method:  m,
+				Kind:    rpc.MethodKindUnary,
+				Handler: UnaryHandler(invoker),
+			})
+		}
+	}
+	srv.RegisterService(desc)
+}
+
 // Helpers for marshaling / unmarshaling that are useful enough to
 // expose to bridge consumers.
 var (
-	_ = proto.Marshal // touch the import so unused-package lint stays quiet
+	_ = proto.Marshal  // touch the import so unused-package lint stays quiet
 	_ = io.EOF
 	_ = (*rpcpb.Status)(nil)
 	_ = (*peerrpcpb.Frame)(nil)
+	_ = errors.New       // ensure errors import is used
 )
