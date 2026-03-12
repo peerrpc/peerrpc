@@ -17,8 +17,8 @@
 //	              -room "room-id-from-app" \
 //	              -peer-id "relay-1"
 //
-// The binary defaults to the in-process signaling backend suitable
-// for localhost demos. Pass -signal to point at a standalone
+// Without -signal, the relay uses the in-process signaling backend
+// suitable for localhost demos. Pass -signal to point at a standalone
 // signal-server instead.
 package main
 
@@ -37,6 +37,7 @@ import (
 )
 
 func main() {
+	signalAddr := flag.String("signal", "", "signal server base URL (e.g. http://localhost:8080)")
 	roomID := flag.String("room", "", "room id to relay between two peers")
 	peerID := flag.String("peer-id", "relay", "peer id the relay uses in the signaling room")
 	bufSize := flag.Int("buf", 256, "per-direction forward buffer (frames)")
@@ -48,7 +49,16 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	backend := signalsdk.NewLocal() // v1 relay-server runs in-process; v1.1 adds a connect-go client
+
+	// Select signaling backend: remote if -signal is given, else in-process.
+	var backend signalsdk.Backend
+	if *signalAddr != "" {
+		backend = signalsdk.NewRemote(*signalAddr)
+		logger.Info("using remote signaling", "addr", *signalAddr)
+	} else {
+		backend = signalsdk.NewLocal()
+		logger.Info("using in-process signaling")
+	}
 
 	srv, err := relay.New(relay.Config{
 		Signaling:         backend,
