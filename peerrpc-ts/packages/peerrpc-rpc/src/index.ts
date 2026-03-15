@@ -14,7 +14,6 @@ import {
   INLINE_MAX,
   MESSAGE_MAX,
   CHUNK_SIZE,
-  type Frame,
   type ResponseFrame,
 } from "@peerrpc/protocol";
 import { Frame, Call, End, Data, Chunk, Routing } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
@@ -163,9 +162,15 @@ export class Client {
   /**
    * Invoke a client-streaming RPC. The caller uses the returned
    * ClientStream's send() + closeSend() + recv().
+   *
+   * @param method - Fully qualified method path.
+   * @param firstReq - Optional initial payload sent inline with the
+   *   Call frame (≤INLINE_MAX) or as Data frames.
+   * @param metadata - Optional request metadata.
    */
   async invokeClientStreaming(
     method: string,
+    firstReq?: Uint8Array,
     metadata?: Metadata
   ): Promise<ClientStream> {
     const stream = this.openStream();
@@ -177,22 +182,34 @@ export class Client {
       }
       call.metadata = { md };
     }
+    if (firstReq && firstReq.length <= INLINE_MAX) {
+      call.inlineData = firstReq;
+    }
     await this.ch.send(new Frame({
       routing: new Routing({ sequence: stream.seq }),
       type: { case: "call", value: call },
     }));
+    // If firstReq is large, send as Data frames.
+    if (firstReq && firstReq.length > INLINE_MAX) {
+      await this.sendPayload(stream.seq, firstReq);
+    }
     return new ClientStream(stream, this.ch);
   }
 
   /**
    * Invoke a bidi-streaming RPC. Wire shape is identical to client-
    * streaming; the difference is how the application uses recv().
+   *
+   * @param method - Fully qualified method path.
+   * @param firstReq - Optional initial payload (see invokeClientStreaming).
+   * @param metadata - Optional request metadata.
    */
   async invokeBidiStreaming(
     method: string,
+    firstReq?: Uint8Array,
     metadata?: Metadata
   ): Promise<ClientStream> {
-    return this.invokeClientStreaming(method, metadata);
+    return this.invokeClientStreaming(method, firstReq, metadata);
   }
 
   private openStream(): StreamState {
