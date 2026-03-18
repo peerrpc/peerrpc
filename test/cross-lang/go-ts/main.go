@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -86,6 +87,50 @@ func main() {
 						}
 					}
 					return rpc.OK()
+				},
+			},
+			{
+				Method: "Collect",
+				Kind:   rpc.MethodKindClientStreaming,
+				Handler: func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
+					var n, total int
+					for {
+						msg, err := s.Recv()
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							return rpc.Err(13, err)
+						}
+						n++
+						total += len(msg)
+					}
+					reply := []byte(fmt.Sprintf("received %d messages (%d bytes)", n, total))
+					if err := s.Send(reply); err != nil {
+						return rpc.Err(13, err)
+					}
+					return rpc.OK()
+				},
+			},
+			{
+				Method: "Chat",
+				Kind:   rpc.MethodKindBidiStreaming,
+				Handler: func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
+					var seq int
+					for {
+						msg, err := s.Recv()
+						if err == io.EOF {
+							return rpc.OK()
+						}
+						if err != nil {
+							return rpc.Err(13, err)
+						}
+						seq++
+						reply := []byte(fmt.Sprintf("ack %d: %s", seq, string(msg)))
+						if err := s.Send(reply); err != nil {
+							return rpc.Err(13, err)
+						}
+					}
 				},
 			},
 		},

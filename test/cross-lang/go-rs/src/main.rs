@@ -141,6 +141,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(status.is_ok(), "stream ended with non-OK status");
     assert_eq!(chunks, 5, "expected 5 chunks, got {}", chunks);
 
+    // 7. Issue Client Streaming RPC.
+    tracing::info!("invoking Client Streaming: /echo.Echo/Collect");
+    let mut cstream = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.invoke_client_streaming("/echo.Echo/Collect", Some(b"first")),
+    )
+    .await??;
+
+    // Send additional chunks.
+    cstream.send(b"chunk-2").map_err(|e| format!("send: {e}"))?;
+    cstream.send(b"chunk-3").map_err(|e| format!("send: {e}"))?;
+    cstream.close_send().map_err(|e| format!("close_send: {e}"))?;
+
+    let resp = tokio::time::timeout(
+        Duration::from_secs(10),
+        cstream.recv(),
+    )
+    .await
+    .map_err(|_| "client-streaming recv timeout")?
+    .ok_or("no response")?;
+    let resp_str = String::from_utf8_lossy(&resp);
+    tracing::info!("Client Streaming response: {}", resp_str);
+    assert!(resp_str.contains("3 messages"), "unexpected: {}", resp_str);
+
+    let status = cstream.wait_end().await;
+    assert!(status.is_ok(), "client-stream ended non-OK");
+
+    // 8. Issue Bidi Streaming RPC.
+    tracing::info!("invoking Bidi Streaming: /echo.Echo/Chat");
+    let mut bstream = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.invoke_bidi_streaming("/echo.Echo/Chat"),
+    )
+    .await??;
+
+    for i in 1..=3 {
+        let msg = format!("msg-{}", i);
+        bstream.send(msg.as_bytes()).map_err(|e| format!("bidi send: {e}"))?;
+        let resp = tokio::time::timeout(
+            Duration::from_secs(10),
+            bstream.recv(),
+        )
+        .await
+        .map_err(|_| "bidi recv timeout")?
+        .ok_or("no bidi response")?;
+        let resp_str = String::from_utf8_lossy(&resp);
+        tracing::info!("  ack {}: {}", i, resp_str);
+        assert_eq!(resp_str, format!("ack {}: msg-{}", i, i));
+    }
+
+    bstream.close_send().map_err(|e| format!("bidi close_send: {e}"))?;
+
+    // After close_send the server returns OK → EOF.
+    let after = tokio::time::timeout(Duration::from_secs(5), bstream.recv()).await;
+    match after {
+        Ok(None) => tracing::info!("bidi stream ended cleanly"),
+        Ok(Some(d)) => tracing::warn!("unexpected data after close_send: {:?}", d),
+        Err(_) => tracing::warn!("bidi recv after close_send timed out (acceptable)"),
+    }
+
+    let status = bstream.wait_end().await;
+    assert!(status.is_ok(), "bidi ended non-OK");
+
     tracing::info!("=== ALL TESTS PASSED ===");
     Ok(())
 }

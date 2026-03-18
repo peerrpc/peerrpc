@@ -69,4 +69,28 @@ test.describe("Go ↔ TS interop", () => {
       );
     }
   });
+
+  test("Client Streaming RPC collects chunks", async () => {
+    const msg = `collect-${Date.now()}`;
+    await page.fill("#collect-input", msg);
+    await page.click("#collect-btn");
+
+    await expect(page.locator("#collect-output")).toContainText(
+      "Response: received 3 messages",
+      { timeout: 10_000 }
+    );
+  });
+
+  test("Bidi Streaming RPC echoes back acks", async () => {
+    const msg = `chat-${Date.now()}`;
+    await page.fill("#chat-input", msg);
+    await page.click("#chat-btn");
+
+    const output = page.locator("#chat-output");
+    for (let i = 1; i <= 3; i++) {
+      await expect(output).toContainText(`ack: ack ${i}: ${msg}-${i}`, {
+        timeout: 10_000,
+      });
+    }
+  });
 });
