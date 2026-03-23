@@ -227,4 +227,78 @@ function wireButtons(): void {
     }
     streamBtn.disabled = false;
   });
+
+  // --- Client Streaming (Collect) ----------------------------------
+  const collectBtn = $<HTMLButtonElement>("collect-btn");
+  const collectInput = $<HTMLInputElement>("collect-input");
+  const collectOutput = $<HTMLPreElement>("collect-output");
+
+  collectBtn.addEventListener("click", async () => {
+    if (!client) {
+      collectOutput.textContent = "Not connected";
+      return;
+    }
+    collectBtn.disabled = true;
+    collectOutput.textContent = "Sending chunks...";
+    try {
+      const payload = new TextEncoder().encode(collectInput.value);
+      const stream = await client.invokeClientStreaming(
+        "/echo.Echo/Collect",
+        payload,
+      );
+      // Send two more chunks after the first (inlined in Call).
+      await stream.send(new TextEncoder().encode("chunk-2"));
+      await stream.send(new TextEncoder().encode("chunk-3"));
+      await stream.closeSend();
+      const resp = await stream.recv();
+      if (resp) {
+        collectOutput.textContent = `Response: ${new TextDecoder().decode(resp)}`;
+      } else {
+        collectOutput.textContent = "No response (EOF)";
+      }
+      const s = stream.status;
+      if (s && s.code !== 0) {
+        collectOutput.textContent += `\nStatus: ${s.code} ${s.message}`;
+      }
+    } catch (err) {
+      collectOutput.textContent = `Exception: ${err}`;
+    }
+    collectBtn.disabled = false;
+  });
+
+  // --- Bidi Streaming (Chat) ---------------------------------------
+  const chatBtn = $<HTMLButtonElement>("chat-btn");
+  const chatInput = $<HTMLInputElement>("chat-input");
+  const chatOutput = $<HTMLPreElement>("chat-output");
+
+  chatBtn.addEventListener("click", async () => {
+    if (!client) {
+      chatOutput.textContent = "Not connected";
+      return;
+    }
+    chatBtn.disabled = true;
+    chatOutput.textContent = "Chatting...";
+    try {
+      const stream = await client.invokeBidiStreaming(
+        "/echo.Echo/Chat",
+      );
+      const lines: string[] = [];
+      for (let i = 1; i <= 3; i++) {
+        const msg = `${chatInput.value}-${i}`;
+        await stream.send(new TextEncoder().encode(msg));
+        const resp = await stream.recv();
+        if (resp) {
+          lines.push(`ack: ${new TextDecoder().decode(resp)}`);
+        } else {
+          lines.push(`no ack for msg-${i}`);
+          break;
+        }
+      }
+      await stream.closeSend();
+      chatOutput.textContent = lines.join("\n");
+    } catch (err) {
+      chatOutput.textContent = `Exception: ${err}`;
+    }
+    chatBtn.disabled = false;
+  });
 }

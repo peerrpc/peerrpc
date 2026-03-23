@@ -50,6 +50,20 @@
       <button id="stream-btn">Send Stream</button>
     </div>
     <pre id="stream-output">No chunks yet</pre>
+
+    <h2>Client Streaming RPC (Collect)</h2>
+    <div class="row">
+      <input id="collect-input" value="collect-payload" />
+      <button id="collect-btn">Send 3 chunks</button>
+    </div>
+    <pre id="collect-output">No response yet</pre>
+
+    <h2>Bidi Streaming RPC (Chat)</h2>
+    <div class="row">
+      <input id="chat-input" value="chat-message" />
+      <button id="chat-btn">Send 3 messages</button>
+    </div>
+    <pre id="chat-output">No responses yet</pre>
   </div>
 
   <script type="module" src="./src/main.ts"></script>
