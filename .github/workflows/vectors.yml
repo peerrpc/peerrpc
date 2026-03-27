@@ -1,13 +1,19 @@
-name: vectors
+# Protocol golden vector regression gate.
+#
+# Enforces that the golden protocol vectors still decode/encode
+# byte-for-byte and match expected.json across all three SDKs.
 
-# Phase 0 regression gate: enforce that the golden protocol vectors
-# still decode/encode byte-for-byte and match expected.json.
+name: vectors
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+concurrency:
+  group: vectors-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   golden-vectors:
@@ -18,8 +24,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
-          cache-dependency-path: peerrpc-go/go.sum
+          go-version: stable
+          cache: true
 
       - name: Install buf
         uses: bufbuild/buf-setup-action@v1
@@ -27,12 +33,10 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: buf lint
-        working-directory: .
         run: buf lint
 
       - name: buf breaking (against main)
         if: github.event_name == 'pull_request'
-        working-directory: .
         run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main,subdir=."
 
       - name: buf generate
@@ -41,19 +45,41 @@ jobs:
       - name: Verify generated code is in sync
         run: |
           if ! git diff --exit-code -- peerrpc-go/gen peerrpc-ts peerrpc-rs/gen; then
-            echo "::error::generated code is stale; run 'buf generate' and commit the result"
+            echo "::error generated code is stale; run 'buf generate' and commit the result"
             exit 1
           fi
 
-      - name: Verify committed vectors match the generator output
+      - name: Verify committed vectors match the Go generator output
         run: |
           cd peerrpc-go
           go run ./cmd/gen-vectors
           cd ..
           if ! git diff --exit-code -- test/vectors; then
-            echo "::error::test/vectors is stale; run 'make gen-vectors' and commit the result"
+            echo "::error test/vectors is stale; run 'make gen-vectors' and commit the result"
             exit 1
           fi
 
-      - name: Run Go regression tests
-        run: cd peerrpc-go && go test ./... -race -count=1
+      - name: Run Go protocol regression tests
+        run: cd peerrpc-go && go test -race -count=1 ./protocol/...
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: peerrpc-ts/package-lock.json
+
+      - name: Run TS protocol vector tests
+        working-directory: peerrpc-ts
+        run: |
+          npm ci
+          npx vitest run packages/peerrpc-protocol
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run Rust protocol vector tests
+        working-directory: peerrpc-rs
+        run: cargo test -p peerrpc-protocol
