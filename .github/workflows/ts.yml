@@ -1,0 +1,47 @@
+# TypeScript SDK CI: build and test all packages in the peerrpc-ts workspace.
+
+name: ts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ts-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: peerrpc-ts
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: peerrpc-ts/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check for uncommitted generated files
+        run: |
+          if [ -n "$(git status --porcelain packages/)" ]; then
+            echo "::error uncommitted changes in packages/ after build"
+            git status --porcelain packages/
+            exit 1
+          fi

@@ -1,0 +1,151 @@
+# Go SDK CI: build, vet, lint, and test all Go modules in the repository.
+#
+# Modules:
+#   peerrpc-go/        — core SDK (protocol, transport, peer, rpc, signal, auth, crypto, observability, relay, grpcbridge)
+#   signal-server/     — standalone signaling server
+#   relay-server/      — standalone relay binary
+#   grpcbridge-server/ — standalone gRPC-Connect bridge binary
+#   examples/go/echo/  — end-to-end echo demo
+#   test/cross-lang/go-ts/e2e/ — cross-language interop (Playwright, build-tag guarded)
+
+name: go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: go-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Verify go.mod versions
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            version=$(grep '^go ' "$mod" | awk '{print $2}')
+            if [ -z "$version" ]; then
+              echo "::error $mod: missing go version directive"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+
+      - name: Run go vet
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "=== vet $dir ==="
+            (cd "$dir" && go vet ./...) || FAILED=1
+          done
+          exit $FAILED
+
+      - name: Run staticcheck
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "=== staticcheck $dir ==="
+            (cd "$dir" && staticcheck ./...) || FAILED=1
+          done
+          exit $FAILED
+
+      - name: Verify tidy
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "=== tidy $dir ==="
+            (cd "$dir" && go mod tidy) || FAILED=1
+            if [ -n "$(git -C "$dir" status --porcelain go.mod go.sum 2>/dev/null)" ]; then
+              echo "::error $dir: go.mod or go.sum needs tidy"
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Build all modules
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "=== build $dir ==="
+            (cd "$dir" && go build ./...) || FAILED=1
+          done
+          exit $FAILED
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: buf lint
+        run: buf lint
+
+      - name: buf generate
+        run: buf generate
+
+      - name: Run tests with race detector
+        run: |
+          FAILED=0
+          for mod in $(find . -name go.mod -not -path '*/vendor/*'); do
+            dir=$(dirname "$mod")
+            echo "=== test $dir ==="
+            # Skip the cross-lang test that requires Playwright / browser
+            if echo "$dir" | grep -q 'test/cross-lang/go-ts'; then
+              echo "  (skipping — requires Playwright, run manually)"
+              continue
+            fi
+            (cd "$dir" && go test -race -count=1 -timeout 120s ./...) || FAILED=1
+          done
+          exit $FAILED
+
+      - name: Verify golden vectors
+        run: |
+          cd peerrpc-go
+          go run ./cmd/gen-vectors
+          cd ..
+          if ! git diff --exit-code -- test/vectors; then
+            echo "::error test/vectors is stale; run 'make gen-vectors' and commit the result"
+            exit 1
+          fi
