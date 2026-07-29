@@ -38,6 +38,7 @@ coverage/
 # Go binaries
 *.exe
 peerrpc-echo
+/peerrpc
 
 # Local binaries
 relay-server/server
