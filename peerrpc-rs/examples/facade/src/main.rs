@@ -16,9 +16,43 @@ use std::time::Duration;
 
 use peerrpc::{dial, listen};
 use peerrpc_rpc::{
-    server::{MethodDesc, MethodKind, Server, ServerStream, ServiceDesc},
+    server::{BoxFuture, MethodDesc, MethodKind, Server, ServerStream, ServiceDesc},
     Status,
 };
+
+fn unary_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sync> {
+    Arc::new(|s: ServerStream| {
+        Box::pin(async move {
+            // Full echo: recv → prefix → send. Made natural by the
+            // &self API on recv/send (no `mut` needed, no borrow-
+            // checker fights).
+            let req = match s.recv().await {
+                Some(b) => b,
+                None => return Status { code: 13, message: "empty request".into() },
+            };
+            let mut resp = Vec::with_capacity(6 + req.len());
+            resp.extend_from_slice(b"echo: ");
+            resp.extend_from_slice(&req);
+            match s.send(resp).await {
+                Ok(()) => Status::ok(),
+                Err(e) => Status { code: 13, message: e },
+            }
+        })
+    })
+}
+
+fn new_echo_server() -> Server {
+    let mut srv = Server::new();
+    srv.register_service(ServiceDesc {
+        service_name: "echo.Echo".into(),
+        methods: vec![MethodDesc {
+            method: "Unary".into(),
+            kind: MethodKind::Unary,
+            handler: unary_handler(),
+        }],
+    });
+    srv
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,33 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             match ln.accept().await {
                 Ok(peer) => {
-                    let mut srv = Server::new();
-                    srv.register_service(ServiceDesc {
-                        service_name: "echo.Echo".into(),
-                        methods: vec![MethodDesc {
-                            method: "Unary".into(),
-                            kind: MethodKind::Unary,
-                            handler: Arc::new(|s: ServerStream| {
-                                Box::pin(async move {
-                                    // Full echo: recv → prefix → send.
-                                    // Made natural by the &self API
-                                    // on recv/send (no `mut` needed,
-                                    // no borrow-checker fights).
-                                    let req = match s.recv().await {
-                                        Some(b) => b,
-                                        None => return Status { code: 13, message: "empty request".into() },
-                                    };
-                                    let mut resp = Vec::with_capacity(6 + req.len());
-                                    resp.extend_from_slice(b"echo: ");
-                                    resp.extend_from_slice(&req);
-                                    if let Err(e) = s.send(resp).await {
-                                        return Status { code: 13, message: e };
-                                    }
-                                    Status::ok()
-                                })
-                            }),
-                        }],
-                    });
+                    let srv = new_echo_server();
                     tokio::spawn(async move {
                         let _ = srv.serve(peer).await;
                     });
@@ -77,8 +85,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .client
         .invoke_unary("/echo.Echo/Unary", b"hello, peerrpc")
         .await?;
-    println!("status: {:?}", status);
-    println!("response bytes: {}", response.len());
+    println!("status: {status:?}");
+    println!("response: {}", String::from_utf8_lossy(&response));
 
     drop(conn);
     server_task.abort();
