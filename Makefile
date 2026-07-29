@@ -62,6 +62,6 @@ run-facades:
 # ── Cross-language samples ───────────────────────────────────────
 
 run-interop-server:
-	$(GO) run ./test/cross-lang/go-ts -addr :3000 -auto-tls
+	cd test/cross-lang/go-ts && $(GO) run . -addr :3000 -auto-tls
 
 run-sample: run-interop-server
