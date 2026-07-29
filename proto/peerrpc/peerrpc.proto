@@ -6,7 +6,7 @@ option go_package = "github.com/peerrpc/go/gen/proto/peerrpc;peerrpcpb";
 
 import "google/rpc/status.proto";
 
-// PeerRPC wire protocol v2.
+// PeerRPC wire protocol.
 //
 // Two top-level envelope frames are used:
 //   * Frame          - client  -> server

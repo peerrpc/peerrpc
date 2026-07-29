@@ -9,10 +9,10 @@
  *   local    → in-process signaling (no network)
  *   connect  → Connect-RPC over HTTP/2 (Node / non-browser)
  *   ws       → WebSocket (browser)
- *   relay    → explicit relay hop (v2.1; not yet implemented)
+ *   relay    → explicit relay hop (not yet implemented)
  *
  * authority: signal-server host (ignored for local).
- * service:   rendezvous key (replaces v1 roomId).
+ * service:   rendezvous key.
  *
  * query opts (all optional):
  *   ?as=client|server   role hint

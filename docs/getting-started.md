@@ -7,7 +7,7 @@ echo service in Go, TypeScript, and Rust.
 ## Architecture Overview
 
 ```
-+----------+   WebRTC DataChannel    +----------+
++----------+   WebRTC DataChannel   +----------+
 |  Peer A  |<---------------------->|  Peer B  |
 |  (Go SDK)|   (P2P encrypted)      |  (TS SDK)|
 +----+-----+                        +----+-----+
@@ -34,7 +34,7 @@ an application-layer **relay** can forward traffic between two peers:
 
 ## Concepts
 
-- **Protocol**: Custom protobuf wire format v2 with Frame/ResponseFrame,
+- **Protocol**: Custom protobuf wire format with Frame/ResponseFrame,
   length-prefixed encoding, and chunk reassembly for large messages.
 - **Transport**: Wraps a WebRTC DataChannel with backpressure and
   transparent chunking at 256 KiB boundaries.

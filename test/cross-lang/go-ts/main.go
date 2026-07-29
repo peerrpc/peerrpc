@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	"github.com/peerrpc/go/peer"
 	"github.com/peerrpc/go/rpc"
 	signalsdk "github.com/peerrpc/go/signal"
@@ -140,7 +140,7 @@ func main() {
 	signalSrv := server.New(store.NewMemory(), server.Config{Logger: logger})
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbv2connect.NewSignalingServiceHandler(signalSrv)
+	path, handler := signalingpbconnect.NewSignalingServiceHandler(signalSrv)
 	mux.Handle(path, handler)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

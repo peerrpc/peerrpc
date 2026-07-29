@@ -1,11 +1,6 @@
 /**
- * v2 facade demo: shows the new peerrpc.dial / peerrpc.listen API
+ * Facade demo: shows the peerrpc.dial / peerrpc.listen API
  * for TypeScript.
- *
- * Compared to the v1 chat example (which copy-pastes ~80 lines of
- * signal-pump code per client and another ~100 for the server),
- * the v2 facade does the same work in ~20 lines and exposes no
- * magic strings (no "demo-room", no "offerer"/"answerer").
  *
  * Requires `wrtc` for Node.js RTCPeerConnection (the browser
  * doesn't need a polyfill; see examples/ts/chat for the browser

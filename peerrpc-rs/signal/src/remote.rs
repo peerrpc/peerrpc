@@ -1,15 +1,11 @@
 //! Remote backend: tonic-based signaling client that talks to a
-//! remote signal-server over the v2 proto.
+//! remote signal-server.
 //!
-//! Mirrors Go's `signal.Remote` and TS's `ConnectSignalV2`. The
+//! Mirrors Go's `signal.Remote` and TS's `ConnectSignal`. The
 //! caller hands us a base URL (e.g. "http://signal.example.com:8080")
 //! and a (service, peer_id) pair; we open a bidi stream, send the
 //! AnnounceRequest as the first message, and pump SDP/ICE envelopes
 //! both ways.
-//!
-//! Only the v2 wire format is spoken here. v1 callers should keep
-//! using Local or migrate via the @peerrpc/peerrpc facade (which
-//! hides the proto version entirely).
 
 use std::sync::Arc;
 
@@ -18,7 +14,7 @@ use tonic::Request;
 
 #[allow(dead_code)]
 mod gen {
-    include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.v2.rs"));
+    include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.rs"));
 }
 
 use gen::{
@@ -27,7 +23,7 @@ use gen::{
 
 use crate::{IceCandidate, SdpAnswer, SignalBody, SdpOffer, Session, SignalError, SignalMessage};
 
-/// Remote speaks the v2 signaling wire format over HTTP/2 (via tonic).
+/// Remote speaks the signaling wire format over HTTP/2 (via tonic).
 pub struct Remote {
     base_url: String,
 }
@@ -77,7 +73,7 @@ impl Remote {
             service: service.to_string(),
             body: Some(gen::signal_message::Body::Announce(AnnounceRequest {
                 peer_id: peer_id.to_string(),
-                peer_pubkey: None, // v2 accepts but does not verify; v2.1 wires this.
+                peer_pubkey: None, // accepted but not verified yet.
                 role: gen::announce_request::Role::Client as i32,
             })),
         };

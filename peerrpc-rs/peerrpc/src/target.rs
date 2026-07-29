@@ -9,17 +9,17 @@
 //! scheme:
 //!   local    → in-process signaling (no network)
 //!   connect  → tonic over HTTP/2 (the default Remote backend)
-//!   ws       → reserved for v2.1 (browser WebSocket; not yet wired)
-//!   relay    → reserved for v2.1 (explicit relay hop)
+//!   ws       → browser WebSocket (not yet wired)
+//!   relay    → explicit relay hop (not yet implemented)
 //!
 //! authority: signal-server host (ignored for local).
-//! service:   rendezvous key (replaces v1 room_id).
+//! service:   rendezvous key.
 //!
 //! query opts (all optional):
 //!   ?as=client|server   role hint
 //!   ?peer=<id>          peer_id; defaults to an auto-generated UUID
 //!   ?token=<jwt>        bearer token (placeholder; tonic interceptor
-//!                       wiring ships in v2.1)
+//!                       wiring ships in a future release)
 
 use thiserror::Error;
 

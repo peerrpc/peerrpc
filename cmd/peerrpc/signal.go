@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
@@ -31,7 +31,7 @@ var signalCmd = &cobra.Command{
 	Short: "Run the signaling server",
 	Long: `Start the standalone PeerRPC signaling server.
 
-Exposes peerrpc.signaling.v1.SignalingService over HTTP (Connect,
+Exposes peerrpc.signaling.SignalingService over HTTP (Connect,
 gRPC, and gRPC-Web via a single handler).`,
 	RunE: runSignal,
 }
@@ -80,7 +80,7 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbv2connect.NewSignalingServiceHandler(svc, opts...)
+	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

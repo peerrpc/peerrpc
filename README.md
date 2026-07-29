@@ -20,8 +20,8 @@ PeerRPC has its own frame format defined in `proto/peerrpc/peerrpc.proto`.
 ```
 peerrpc/
 ├── proto/                 # protocol definitions (single source of truth)
-│   ├── peerrpc/           #   core frame protocol v2
-│   └── peerrpc/signaling/v2/  # signaling protocol
+│   ├── peerrpc/           #   core frame protocol
+│   └── peerrpc/signaling/ #   signaling protocol
 ├── peerrpc-go/            # Go SDK
 ├── peerrpc-ts/            # TypeScript SDK
 ├── peerrpc-rs/            # Rust SDK

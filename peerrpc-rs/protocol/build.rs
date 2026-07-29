@@ -3,7 +3,7 @@
 // The proto files live at ../../proto/ relative to this crate.
 // We configure prost-build to output the correct module hierarchy:
 //   peerrpc.* → peerrpc::
-//   peerrpc.signaling.v1.* → peerrpc.signaling.v1::
+//   peerrpc.signaling.* → peerrpc.signaling::
 //   google.rpc.* → google.rpc::
 
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ fn main() {
 
     let protos = [
         proto_root.join("peerrpc/peerrpc.proto"),
-        proto_root.join("peerrpc/signaling/v2/signaling.proto"),
+        proto_root.join("peerrpc/signaling/signaling.proto"),
         proto_root.join("google/rpc/status.proto"),
         proto_root.join("google/protobuf/any.proto"),
     ];

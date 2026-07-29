@@ -198,10 +198,7 @@ impl Peer {
         // before returning the SDP). Trickled ICE candidate forwarding
         // is intentionally omitted here because webrtc-rs's candidate
         // trait-object shape is awkward to plumb through on_ice_candidate
-        // without depending on internal types. v2.1 will add a proper
-        // adapter; for now localhost-only and STUN-only deployments
-        // work without trickle, and TURN-only environments degrade
-        // to longer connection setup (full gathering before signaling).
+        // without depending on internal types.
         while let Some(msg) = sig.recv().await {
             if let Some(answer) = msg.body.answer {
                 peer.set_remote_answer(answer.sdp).await?;

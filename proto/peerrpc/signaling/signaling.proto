@@ -1,22 +1,15 @@
 syntax = "proto3";
 
-package peerrpc.signaling.v2;
+package peerrpc.signaling;
 
-option go_package = "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2;signalingpbv2";
+option go_package = "github.com/peerrpc/go/gen/proto/peerrpc/signaling;signalingpb";
 
-// SignalingService is the v2 rendezvous service used by two PeerRPC
+// SignalingService is the rendezvous service used by two PeerRPC
 // nodes to exchange WebRTC SDP offers/answers and ICE candidates
 // before a DataChannel is established.
 //
-// v2 replaces v1's room_id with service, JoinRequest with
-// AnnounceRequest, and ROLE_OFFERER/ROLE_ANSWERER with
-// ROLE_CLIENT/ROLE_SERVER (the WebRTC offerer is now an internal
-// SDK concern, not a signaling-layer concept). New ROLE_RELAY and
-// ROLE_BRIDGE values let the server distinguish relay and bridge
-// nodes from ordinary peers.
-//
-// The optional peer_pubkey field is reserved for v2.1's Ed25519
-// strong-identity feature; v2 servers MUST accept it but MAY ignore
+// The optional peer_pubkey field is reserved for Ed25519
+// strong-identity feature; servers MUST accept it but MAY ignore
 // it.
 service SignalingService {
   // Exchange is a bidirectional stream. A client announces itself
@@ -31,9 +24,6 @@ service SignalingService {
 message SignalMessage {
   // service is the rendezvous key. Two peers wishing to establish a
   // DataChannel MUST announce against the same service.
-  //
-  // v1 equivalent: room_id. The rename reflects that v2 is always a
-  // two-party rendezvous, not a multi-party room.
   string service = 1;
 
   oneof body {
@@ -51,9 +41,6 @@ message SignalMessage {
 //
 // Auth is enforced server-side via a Connect interceptor that
 // validates the Authorization header before the stream is admitted.
-//
-// v1 equivalent: JoinRequest. The rename reflects intent ("declare
-// presence" rather than "enter a room").
 message AnnounceRequest {
   // peer_id is the caller-chosen identifier for itself within the
   // service. The server MAY reject duplicates.
@@ -63,19 +50,16 @@ message AnnounceRequest {
   string peer_id = 1;
 
   // peer_pubkey carries an Ed25519 public key when the peer opts
-  // into the strong-identity model. v2 servers MUST accept this
-  // field but MAY ignore it; full verification ships in v2.1.
+  // into the strong-identity model. Servers MUST accept this
+  // field but MAY ignore it; full verification ships in a future
+  // release.
   optional bytes peer_pubkey = 2;
 
   Role role = 3;
 
   // Role disambiguates the peer's application-level part.
   //
-  // v1's ROLE_OFFERER/ROLE_ANSWERER are replaced because the WebRTC
-  // offer direction is now derived by the SDK (offerer = the side
-  // that calls Dial) and is no longer a signaling concern.
-  //
-  // New ROLE_RELAY / ROLE_BRIDGE values let the server identify
+  // ROLE_RELAY / ROLE_BRIDGE values let the server identify
   // relay-server and grpcbridge-server peers and apply differentiated
   // policy (e.g. prevent two relays in the same service).
   enum Role {

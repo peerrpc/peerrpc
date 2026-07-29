@@ -1,5 +1,5 @@
 // Package signal remote backend: connect-go client that speaks the
-// v2 signaling wire format (service / AnnounceRequest) to a remote
+// signaling wire format (service / AnnounceRequest) to a remote
 // signal-server.
 
 package signal
@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"sync"
 
-	signalingpbv2 "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2"
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 
 	"connectrpc.com/connect"
 )
@@ -55,7 +55,7 @@ func (r *Remote) Exchange(ctx context.Context, service, peerID string) (*Session
 		return nil, errors.New("signal: empty peer id")
 	}
 
-	client := signalingpbv2connect.NewSignalingServiceClient(
+	client := signalingpbconnect.NewSignalingServiceClient(
 		// Default HTTP client; callers can override via connect options.
 		nil,
 		r.baseURL,
@@ -65,12 +65,12 @@ func (r *Remote) Exchange(ctx context.Context, service, peerID string) (*Session
 	stream := client.Exchange(ctx)
 
 	// First message MUST be AnnounceRequest.
-	if err := stream.Send(&signalingpbv2.SignalMessage{
+	if err := stream.Send(&signalingpb.SignalMessage{
 		Service: service,
-		Body: &signalingpbv2.SignalMessage_Announce{
-			Announce: &signalingpbv2.AnnounceRequest{
+		Body: &signalingpb.SignalMessage_Announce{
+			Announce: &signalingpb.AnnounceRequest{
 				PeerId: peerID,
-				Role:   signalingpbv2.AnnounceRequest_ROLE_CLIENT,
+				Role:   signalingpb.AnnounceRequest_ROLE_CLIENT,
 			},
 		},
 	}); err != nil {
@@ -146,44 +146,44 @@ func (r *Remote) Exchange(ctx context.Context, service, peerID string) (*Session
 	return s, nil
 }
 
-// toProtoMessage converts a signal.SignalMessage to the v2 protobuf
+// toProtoMessage converts a signal.SignalMessage to the protobuf
 // wire type.
-func toProtoMessage(msg *SignalMessage) (*signalingpbv2.SignalMessage, error) {
-	pb := &signalingpbv2.SignalMessage{}
+func toProtoMessage(msg *SignalMessage) (*signalingpb.SignalMessage, error) {
+	pb := &signalingpb.SignalMessage{}
 	switch {
 	case msg.Body.Announce != nil:
 		a := msg.Body.Announce
-		req := &signalingpbv2.AnnounceRequest{
+		req := &signalingpb.AnnounceRequest{
 			PeerId: a.PeerID,
-			Role:   signalingpbv2.AnnounceRequest_Role(a.Role),
+			Role:   signalingpb.AnnounceRequest_Role(a.Role),
 		}
 		if a.PeerPubkey != nil {
 			req.PeerPubkey = a.PeerPubkey
 		}
-		pb.Body = &signalingpbv2.SignalMessage_Announce{Announce: req}
+		pb.Body = &signalingpb.SignalMessage_Announce{Announce: req}
 	case msg.Body.Offer != nil:
-		pb.Body = &signalingpbv2.SignalMessage_Offer{
-			Offer: &signalingpbv2.SdpOffer{Sdp: msg.Body.Offer.Sdp},
+		pb.Body = &signalingpb.SignalMessage_Offer{
+			Offer: &signalingpb.SdpOffer{Sdp: msg.Body.Offer.Sdp},
 		}
 	case msg.Body.Answer != nil:
-		pb.Body = &signalingpbv2.SignalMessage_Answer{
-			Answer: &signalingpbv2.SdpAnswer{Sdp: msg.Body.Answer.Sdp},
+		pb.Body = &signalingpb.SignalMessage_Answer{
+			Answer: &signalingpb.SdpAnswer{Sdp: msg.Body.Answer.Sdp},
 		}
 	case msg.Body.Candidate != nil:
-		pb.Body = &signalingpbv2.SignalMessage_Candidate{
-			Candidate: &signalingpbv2.IceCandidate{
+		pb.Body = &signalingpb.SignalMessage_Candidate{
+			Candidate: &signalingpb.IceCandidate{
 				Candidate:     msg.Body.Candidate.Candidate,
 				SdpMid:        msg.Body.Candidate.SdpMid,
 				SdpMlineIndex: msg.Body.Candidate.SdpMLineIndex,
 			},
 		}
 	case msg.Body.Leave != nil:
-		pb.Body = &signalingpbv2.SignalMessage_Leave{
-			Leave: &signalingpbv2.LeaveRequest{Reason: msg.Body.Leave.Reason},
+		pb.Body = &signalingpb.SignalMessage_Leave{
+			Leave: &signalingpb.LeaveRequest{Reason: msg.Body.Leave.Reason},
 		}
 	case msg.Body.Ping != nil:
-		pb.Body = &signalingpbv2.SignalMessage_Ping{
-			Ping: &signalingpbv2.Ping{TimestampMs: msg.Body.Ping.TimestampMs},
+		pb.Body = &signalingpb.SignalMessage_Ping{
+			Ping: &signalingpb.Ping{TimestampMs: msg.Body.Ping.TimestampMs},
 		}
 	default:
 		return nil, errors.New("signal: unknown body type")
@@ -191,12 +191,12 @@ func toProtoMessage(msg *SignalMessage) (*signalingpbv2.SignalMessage, error) {
 	return pb, nil
 }
 
-// fromProtoMessage converts a v2 protobuf SignalMessage to the
+// fromProtoMessage converts a protobuf SignalMessage to the
 // signal.SignalMessage type. Returns nil for unrecognised bodies.
-func fromProtoMessage(pb *signalingpbv2.SignalMessage) *SignalMessage {
+func fromProtoMessage(pb *signalingpb.SignalMessage) *SignalMessage {
 	sm := &SignalMessage{Service: pb.GetService()}
 	switch body := pb.GetBody().(type) {
-	case *signalingpbv2.SignalMessage_Announce:
+	case *signalingpb.SignalMessage_Announce:
 		sm.Body.Announce = &AnnounceRequest{
 			PeerID: body.Announce.GetPeerId(),
 			Role:   Role(body.Announce.GetRole()),
@@ -204,19 +204,19 @@ func fromProtoMessage(pb *signalingpbv2.SignalMessage) *SignalMessage {
 		if body.Announce.GetPeerPubkey() != nil {
 			sm.Body.Announce.PeerPubkey = body.Announce.GetPeerPubkey()
 		}
-	case *signalingpbv2.SignalMessage_Offer:
+	case *signalingpb.SignalMessage_Offer:
 		sm.Body.Offer = &SdpOffer{Sdp: body.Offer.GetSdp()}
-	case *signalingpbv2.SignalMessage_Answer:
+	case *signalingpb.SignalMessage_Answer:
 		sm.Body.Answer = &SdpAnswer{Sdp: body.Answer.GetSdp()}
-	case *signalingpbv2.SignalMessage_Candidate:
+	case *signalingpb.SignalMessage_Candidate:
 		sm.Body.Candidate = &IceCandidate{
 			Candidate:     body.Candidate.GetCandidate(),
 			SdpMid:        body.Candidate.GetSdpMid(),
 			SdpMLineIndex: body.Candidate.GetSdpMlineIndex(),
 		}
-	case *signalingpbv2.SignalMessage_Leave:
+	case *signalingpb.SignalMessage_Leave:
 		sm.Body.Leave = &LeaveRequest{Reason: body.Leave.GetReason()}
-	case *signalingpbv2.SignalMessage_Ping:
+	case *signalingpb.SignalMessage_Ping:
 		sm.Body.Ping = &Ping{TimestampMs: body.Ping.GetTimestampMs()}
 	default:
 		return nil

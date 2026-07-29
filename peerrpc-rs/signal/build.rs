@@ -1,6 +1,6 @@
 // Build script for peerrpc-signal.
 //
-// Generates tonic + prost types for the v2 signaling proto so the
+// Generates tonic + prost types for the signaling proto so the
 // Remote backend can speak the same wire format as the Go and TS
 // clients.
 
@@ -21,13 +21,13 @@ fn main() {
         .build_server(false)
         .out_dir(&out_dir)
         .compile_protos(
-            &["peerrpc/signaling/v2/signaling.proto"]
+            &["peerrpc/signaling/signaling.proto"]
                 .iter()
                 .map(|s| proto_root.join(s).to_str().unwrap().to_string())
                 .collect::<Vec<_>>(),
             &[proto_root.to_str().unwrap()],
         )
-        .expect("failed to compile v2 signaling proto");
+        .expect("failed to compile signaling proto");
 
     println!("cargo:rerun-if-changed={}", proto_root.display());
 }

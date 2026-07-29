@@ -65,7 +65,7 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
     }
     case "ws": {
       const sig = new WebSocketSignal({
-        url: target.signal.startsWith("ws") ? target.signal : `wss://${target.signal}/ws-v2`,
+        url: target.signal.startsWith("ws") ? target.signal : `wss://${target.signal}/ws`,
         service: target.service,
         peerId,
       });
@@ -75,7 +75,7 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
       };
     }
     case "relay":
-      throw new Error("peerrpc: relay scheme not yet implemented (planned for v2.1)");
+      throw new Error("peerrpc: relay scheme not yet implemented");
     default:
       throw new Error(`peerrpc: unknown scheme ${JSON.stringify(target.scheme)}`);
   }
@@ -154,8 +154,7 @@ export async function listen(target: string | Target, opts: ListenOptions = {}):
   applyOpts(t, opts);
 
   // Per-Accept closure so each call mints its own peer_id and
-  // signal client. v1.1 will multiplex many peers over one stream;
-  // v2 keeps the simple per-call model.
+  // signal client.
   const acceptOnce = async (): Promise<ServerConn> => {
     const callTarget: Target = {
       ...t,
@@ -188,8 +187,7 @@ export async function listen(target: string | Target, opts: ListenOptions = {}):
     accept: acceptOnce,
     serve: async (factory) => {
       // Sequential loop; concurrent Accept within one service races
-      // on the v1 store's broadcast-to-others semantics. v2.1's
-      // per-pair rooms will lift this.
+      // on the store's broadcast-to-others semantics.
       while (true) {
         const conn = await acceptOnce();
         const srv = factory();
@@ -198,9 +196,9 @@ export async function listen(target: string | Target, opts: ListenOptions = {}):
       }
     },
     close: async () => {
-      // Nothing held persistently at the facade level for v2; the
+      // Nothing held persistently at the facade level; the
       // local scheme has no resources, and network schemes are
-      // per-Accept. The hook exists so callers can swap in a v2.1
+      // per-Accept. The hook exists so callers can swap in a
       // multiplexed implementation later without changing client
       // code.
     },

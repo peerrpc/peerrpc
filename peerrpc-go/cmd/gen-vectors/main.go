@@ -93,7 +93,7 @@ func main() {
 
 	expected := map[string]any{
 		"$schema":      "https://peerrpcpb.io/vectors/v1",
-		"description":  "Golden protocol vectors for PeerRPC v2. Every SDK MUST decode these bytes identically and re-encode to the same bytes.",
+		"description":  "Golden protocol vectors for PeerRPC. Every SDK MUST decode these bytes identically and re-encode to the same bytes.",
 		"proto_package": "peerrpcpb",
 		"vectors":      descriptors,
 	}

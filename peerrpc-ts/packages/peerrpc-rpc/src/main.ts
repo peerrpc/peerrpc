@@ -8,7 +8,7 @@
  *
  * The Client-side code lives in index.ts for historical reasons
  * (it was the only thing the package shipped at v1). The barrel
- * keeps imports stable across the v1 → v2 transition.
+ * keeps imports stable.
  */
 
 export {

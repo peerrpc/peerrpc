@@ -37,10 +37,10 @@
 //	  local    → in-process signal backend (signal.Local); authority is ignored
 //	  connect  → Connect-RPC over HTTP/2 (signal.Remote); the default for Go clients
 //	  ws       → WebSocket (browser-side; Go clients must use connect)
-//	  relay    → explicit relay hop (v2.1; not yet implemented in Go)
+//	  relay    → explicit relay hop (not yet implemented in Go)
 //
 //	authority:  signal-server host; ignored for local
-//	service:    the rendezvous key (replaces v1 room_id)
+//	service:    the rendezvous key
 //
 //	query opts (all optional):
 //	  ?as=client|server   role hint; defaults to client for Dial, server for Listen
@@ -81,8 +81,7 @@ const (
 	// ErrUnsupportedScheme.
 	SchemeWS Scheme = "ws"
 
-	// SchemeRelay routes through an explicit relay hop. Reserved for
-	// v2.1; not yet implemented.
+	// SchemeRelay routes through an explicit relay hop. Not yet implemented.
 	SchemeRelay Scheme = "relay"
 )
 

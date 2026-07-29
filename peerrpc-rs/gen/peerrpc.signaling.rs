@@ -6,9 +6,6 @@
 pub struct SignalMessage {
     /// service is the rendezvous key. Two peers wishing to establish a
     /// DataChannel MUST announce against the same service.
-    ///
-    /// v1 equivalent: room_id. The rename reflects that v2 is always a
-    /// two-party rendezvous, not a multi-party room.
     #[prost(string, tag="1")]
     pub service: ::prost::alloc::string::String,
     #[prost(oneof="signal_message::Body", tags="2, 3, 4, 5, 6, 7")]
@@ -38,9 +35,6 @@ pub mod signal_message {
 ///
 /// Auth is enforced server-side via a Connect interceptor that
 /// validates the Authorization header before the stream is admitted.
-///
-/// v1 equivalent: JoinRequest. The rename reflects intent ("declare
-/// presence" rather than "enter a room").
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AnnounceRequest {
@@ -52,8 +46,9 @@ pub struct AnnounceRequest {
     #[prost(string, tag="1")]
     pub peer_id: ::prost::alloc::string::String,
     /// peer_pubkey carries an Ed25519 public key when the peer opts
-    /// into the strong-identity model. v2 servers MUST accept this
-    /// field but MAY ignore it; full verification ships in v2.1.
+    /// into the strong-identity model. Servers MUST accept this
+    /// field but MAY ignore it; full verification ships in a future
+    /// release.
     #[prost(bytes="vec", optional, tag="2")]
     pub peer_pubkey: ::core::option::Option<::prost::alloc::vec::Vec<u8>>,
     #[prost(enumeration="announce_request::Role", tag="3")]
@@ -63,11 +58,7 @@ pub struct AnnounceRequest {
 pub mod announce_request {
     /// Role disambiguates the peer's application-level part.
     ///
-    /// v1's ROLE_OFFERER/ROLE_ANSWERER are replaced because the WebRTC
-    /// offer direction is now derived by the SDK (offerer = the side
-    /// that calls Dial) and is no longer a signaling concern.
-    ///
-    /// New ROLE_RELAY / ROLE_BRIDGE values let the server identify
+    /// ROLE_RELAY / ROLE_BRIDGE values let the server identify
     /// relay-server and grpcbridge-server peers and apply differentiated
     /// policy (e.g. prevent two relays in the same service).
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

@@ -77,9 +77,9 @@ func WithToken(token string) option {
 }
 
 // WithIdentity injects an Ed25519 private key whose derived PeerID
-// is announced on the signaling stream. v2 accepts the key on the
-// wire but does NOT yet verify signatures server-side; full
-// verification ships in v2.1. Until then this option only affects
+// is announced on the signaling stream. Servers accept the key on the
+// wire but do NOT yet verify signatures server-side; full
+// verification ships in a future release. Until then this option only affects
 // the peer_id derivation (hash of the public key) when Target.PeerID
 // is empty.
 func WithIdentity(priv ed25519.PrivateKey) option {

@@ -8,7 +8,7 @@
 //
 // The package ships an in-process backend (`Local`) suitable for
 // tests and single-binary demos, and a connect-go network backend
-// (`Remote`) that speaks the v2 signaling wire format (service /
+// (`Remote`) that speaks the signaling wire format (service /
 // AnnounceRequest) to a remote signal-server.
 package signal
 
@@ -19,7 +19,7 @@ import (
 	"sync"
 )
 
-// SignalMessage mirrors proto/peerrpc/signaling/v2/signaling.proto
+// SignalMessage mirrors proto/peerrpc/signaling/signaling.proto
 // without dragging the generated package into every caller. Backends
 // exchange pointers to these values, so they should be treated as
 // read-only by receivers.
@@ -46,8 +46,8 @@ type SignalBody struct {
 type AnnounceRequest struct {
 	PeerID string
 	// PeerPubkey carries an Ed25519 public key when the peer opts
-	// into the strong-identity model. v2 servers accept this field
-	// but do not verify; full verification is planned for v2.1.
+	// into the strong-identity model. Servers accept this field
+	// but do not verify; full verification is planned for a future release.
 	PeerPubkey []byte
 	Role       Role
 }

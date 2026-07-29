@@ -11,23 +11,22 @@ import (
 	"github.com/peerrpc/signal-server/server"
 	"github.com/peerrpc/signal-server/store"
 
-	signalingpbv2 "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2"
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 
 	"connectrpc.com/connect"
 )
 
-// newTestServerV2 boots a connect-go v2 signaling server on top of
-// an in-memory store and returns a ready-to-use v2 client plus the
-// underlying store for assertions. See newTestServer for the v1
-// equivalent.
-func newTestServerV2(t *testing.T, opts ...connect.HandlerOption) (signalingpbv2connect.SignalingServiceClient, *store.Memory) {
+// newTestServer boots a connect-go signaling server on top of
+// an in-memory store and returns a ready-to-use client plus the
+// underlying store for assertions.
+func newTestServer(t *testing.T, opts ...connect.HandlerOption) (signalingpbconnect.SignalingServiceClient, *store.Memory) {
 	t.Helper()
 	mem := store.NewMemory()
 	svc := server.New(mem, server.Config{})
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbv2connect.NewSignalingServiceHandler(svc, opts...)
+	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
 
 	srv := httptest.NewUnstartedServer(mux)
@@ -35,7 +34,7 @@ func newTestServerV2(t *testing.T, opts ...connect.HandlerOption) (signalingpbv2
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	client := signalingpbv2connect.NewSignalingServiceClient(
+	client := signalingpbconnect.NewSignalingServiceClient(
 		srv.Client(),
 		srv.URL,
 		connect.WithSendGzip(),
@@ -43,10 +42,9 @@ func newTestServerV2(t *testing.T, opts ...connect.HandlerOption) (signalingpbv2
 	return client, mem
 }
 
-// runExchangeV2 is the v2 equivalent of runExchange: it pumps
-// everything the stream receives into inbound until the stream
-// closes or ctx is canceled.
-func runExchangeV2(ctx context.Context, stream *connect.BidiStreamForClient[signalingpbv2.SignalMessage, signalingpbv2.SignalMessage], inbound chan<- *signalingpbv2.SignalMessage) error {
+// runExchange pumps everything the stream receives into inbound
+// until the stream closes or ctx is canceled.
+func runExchange(ctx context.Context, stream *connect.BidiStreamForClient[signalingpb.SignalMessage, signalingpb.SignalMessage], inbound chan<- *signalingpb.SignalMessage) error {
 	for {
 		msg, err := stream.Receive()
 		if err != nil {
@@ -61,7 +59,7 @@ func runExchangeV2(ctx context.Context, stream *connect.BidiStreamForClient[sign
 }
 
 // TestHandler_TwoPeersExchangeSDP runs the full bidirectional
-// signaling dance against the v2 connect handler: alice and bob
+// signaling dance: alice and bob
 // both announce against service "echo.Echo", alice sends an SDP
 // offer, bob receives it and responds with an answer. Also covers
 // ICE candidate round-trip.
@@ -69,45 +67,45 @@ func TestHandler_TwoPeersExchangeSDP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client, _ := newTestServerV2(t)
+	client, _ := newTestServer(t)
 
 	aliceStream := client.Exchange(ctx)
 	bobStream := client.Exchange(ctx)
 
 	// Both peers announce.
-	if err := aliceStream.Send(&signalingpbv2.SignalMessage{
+	if err := aliceStream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Announce{
-			Announce: &signalingpbv2.AnnounceRequest{
+		Body: &signalingpb.SignalMessage_Announce{
+			Announce: &signalingpb.AnnounceRequest{
 				PeerId: "alice",
-				Role:   signalingpbv2.AnnounceRequest_ROLE_CLIENT,
+				Role:   signalingpb.AnnounceRequest_ROLE_CLIENT,
 			},
 		},
 	}); err != nil {
 		t.Fatalf("alice announce: %v", err)
 	}
-	if err := bobStream.Send(&signalingpbv2.SignalMessage{
+	if err := bobStream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Announce{
-			Announce: &signalingpbv2.AnnounceRequest{
+		Body: &signalingpb.SignalMessage_Announce{
+			Announce: &signalingpb.AnnounceRequest{
 				PeerId: "bob",
-				Role:   signalingpbv2.AnnounceRequest_ROLE_SERVER,
+				Role:   signalingpb.AnnounceRequest_ROLE_SERVER,
 			},
 		},
 	}); err != nil {
 		t.Fatalf("bob announce: %v", err)
 	}
 
-	aliceIn := make(chan *signalingpbv2.SignalMessage, 8)
-	bobIn := make(chan *signalingpbv2.SignalMessage, 8)
-	go runExchangeV2(ctx, aliceStream, aliceIn)
-	go runExchangeV2(ctx, bobStream, bobIn)
+	aliceIn := make(chan *signalingpb.SignalMessage, 8)
+	bobIn := make(chan *signalingpb.SignalMessage, 8)
+	go runExchange(ctx, aliceStream, aliceIn)
+	go runExchange(ctx, bobStream, bobIn)
 
 	// Alice sends an offer; bob must receive it.
-	if err := aliceStream.Send(&signalingpbv2.SignalMessage{
+	if err := aliceStream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Offer{
-			Offer: &signalingpbv2.SdpOffer{Sdp: "v=0\r\no=- alice 1"},
+		Body: &signalingpb.SignalMessage_Offer{
+			Offer: &signalingpb.SdpOffer{Sdp: "v=0\r\no=- alice 1"},
 		},
 	}); err != nil {
 		t.Fatalf("alice send offer: %v", err)
@@ -130,10 +128,10 @@ func TestHandler_TwoPeersExchangeSDP(t *testing.T) {
 	}
 
 	// Bob replies; alice must receive it.
-	if err := bobStream.Send(&signalingpbv2.SignalMessage{
+	if err := bobStream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Answer{
-			Answer: &signalingpbv2.SdpAnswer{Sdp: "v=0\r\no=- bob 1"},
+		Body: &signalingpb.SignalMessage_Answer{
+			Answer: &signalingpb.SdpAnswer{Sdp: "v=0\r\no=- bob 1"},
 		},
 	}); err != nil {
 		t.Fatalf("bob send answer: %v", err)
@@ -148,10 +146,10 @@ func TestHandler_TwoPeersExchangeSDP(t *testing.T) {
 	}
 
 	// ICE candidate round-trip.
-	if err := aliceStream.Send(&signalingpbv2.SignalMessage{
+	if err := aliceStream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Candidate{
-			Candidate: &signalingpbv2.IceCandidate{Candidate: "candidate:1 1 udp 2122260223 10.0.0.1 60000 typ host"},
+		Body: &signalingpb.SignalMessage_Candidate{
+			Candidate: &signalingpb.IceCandidate{Candidate: "candidate:1 1 udp 2122260223 10.0.0.1 60000 typ host"},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -169,19 +167,19 @@ func TestHandler_TwoPeersExchangeSDP(t *testing.T) {
 	_ = bobStream.CloseResponse()
 }
 
-// TestHandler_RejectsMissingAnnounce verifies the v2 handler
+// TestHandler_RejectsMissingAnnounce verifies the handler
 // enforces Announce-first protocol.
 func TestHandler_RejectsMissingAnnounce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	client, _ := newTestServerV2(t)
+	client, _ := newTestServer(t)
 	stream := client.Exchange(ctx)
 	// Skip the announce; send an offer right away.
-	if err := stream.Send(&signalingpbv2.SignalMessage{
+	if err := stream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Offer{
-			Offer: &signalingpbv2.SdpOffer{Sdp: "v=0"},
+		Body: &signalingpb.SignalMessage_Offer{
+			Offer: &signalingpb.SdpOffer{Sdp: "v=0"},
 		},
 	}); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -199,22 +197,21 @@ func TestHandler_RejectsMissingAnnounce(t *testing.T) {
 }
 
 // TestHandler_AcceptsPeerPubkeyWithoutVerification asserts that
-// peer_pubkey is accepted on the wire (Q3: interface added in v2,
-// verification deferred to v2.1). The handler must not reject the
+// peer_pubkey is accepted on the wire. The handler must not reject the
 // announce and must not attempt to validate the key.
 func TestHandler_AcceptsPeerPubkeyWithoutVerification(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	client, _ := newTestServerV2(t)
+	client, _ := newTestServer(t)
 	stream := client.Exchange(ctx)
 
-	if err := stream.Send(&signalingpbv2.SignalMessage{
+	if err := stream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Announce{
-			Announce: &signalingpbv2.AnnounceRequest{
+		Body: &signalingpb.SignalMessage_Announce{
+			Announce: &signalingpb.AnnounceRequest{
 				PeerId:     "with-key",
-				Role:       signalingpbv2.AnnounceRequest_ROLE_SERVER,
+				Role:       signalingpb.AnnounceRequest_ROLE_SERVER,
 				PeerPubkey: []byte("placeholder-ed25519-pubkey-not-verified-yet"),
 			},
 		},
@@ -225,10 +222,10 @@ func TestHandler_AcceptsPeerPubkeyWithoutVerification(t *testing.T) {
 	// The announce must succeed. We confirm by sending a follow-up
 	// leave and observing the stream close cleanly (an invalid
 	// announce would have surfaced as an error before this point).
-	if err := stream.Send(&signalingpbv2.SignalMessage{
+	if err := stream.Send(&signalingpb.SignalMessage{
 		Service: "echo.Echo",
-		Body: &signalingpbv2.SignalMessage_Leave{
-			Leave: &signalingpbv2.LeaveRequest{Reason: "test"},
+		Body: &signalingpb.SignalMessage_Leave{
+			Leave: &signalingpb.LeaveRequest{Reason: "test"},
 		},
 	}); err != nil {
 		t.Fatalf("Send leave after announce: %v", err)
@@ -243,14 +240,14 @@ func TestHandler_AcceptsPeerPubkeyWithoutVerification(t *testing.T) {
 func TestHandler_RoleEnums(t *testing.T) {
 	cases := []struct {
 		name string
-		got  signalingpbv2.AnnounceRequest_Role
+		got  signalingpb.AnnounceRequest_Role
 		want int32
 	}{
-		{"UNSPECIFIED", signalingpbv2.AnnounceRequest_ROLE_UNSPECIFIED, 0},
-		{"CLIENT", signalingpbv2.AnnounceRequest_ROLE_CLIENT, 1},
-		{"SERVER", signalingpbv2.AnnounceRequest_ROLE_SERVER, 2},
-		{"RELAY", signalingpbv2.AnnounceRequest_ROLE_RELAY, 3},
-		{"BRIDGE", signalingpbv2.AnnounceRequest_ROLE_BRIDGE, 4},
+		{"UNSPECIFIED", signalingpb.AnnounceRequest_ROLE_UNSPECIFIED, 0},
+		{"CLIENT", signalingpb.AnnounceRequest_ROLE_CLIENT, 1},
+		{"SERVER", signalingpb.AnnounceRequest_ROLE_SERVER, 2},
+		{"RELAY", signalingpb.AnnounceRequest_ROLE_RELAY, 3},
+		{"BRIDGE", signalingpb.AnnounceRequest_ROLE_BRIDGE, 4},
 	}
 	for _, c := range cases {
 		if int32(c.got) != c.want {

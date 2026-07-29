@@ -1,6 +1,6 @@
 // Command peerrpc-signal runs the standalone PeerRPC signaling server.
 //
-// It exposes peerrpc.signaling.v2.SignalingService over HTTP. Thanks
+// It exposes peerrpc.signaling.SignalingService over HTTP. Thanks
 // to connect-go a single handler transparently serves:
 //
 //   - Connect clients (connect-go / @connectrpc/connect-web)
@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
@@ -82,7 +82,7 @@ func main() {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbv2connect.NewSignalingServiceHandler(svc, opts...)
+	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
 
 	// /healthz for liveness probes; the handler does not need a store

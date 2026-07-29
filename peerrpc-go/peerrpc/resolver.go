@@ -52,7 +52,7 @@ type Resolution struct {
 // ErrUnsupportedScheme is returned by Resolve when no resolver has
 // been registered for the requested scheme. The schemes
 // SchemeConnect and SchemeLocal are always available; SchemeWS and
-// SchemeRelay need explicit registration (and Go SDK v2 does not
+// SchemeRelay need explicit registration (and the Go SDK does not
 // ship a WS client resolver — see NewWSResolver).
 var ErrUnsupportedScheme = errors.New("peerrpc: unsupported scheme; register one with peerrpc.RegisterResolver")
 

@@ -1,9 +1,5 @@
-//! v2 facade demo: shows the new `peerrpc::dial` / `peerrpc::listen`
+//! Facade demo: shows the `peerrpc::dial` / `peerrpc::listen`
 //! API for Rust.
-//!
-//! Compared to the v1 echo example (which manually wires Local +
-//! Peer::dial/accept + Server into ~50 lines across multiple
-//! tokio::spawn blocks), the v2 facade does the same work in ~25
 //! lines and exposes no magic strings (no "demo-room", no
 //! "offerer"/"answerer").
 //!

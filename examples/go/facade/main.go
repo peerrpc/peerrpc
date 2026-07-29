@@ -1,4 +1,4 @@
-// Command peerrpc-facade-demo is the v2 PeerRPC end-to-end demo using
+// Command peerrpc-facade-demo is the PeerRPC end-to-end demo using
 // the new top-level peerrpc.Dial / peerrpc.Listen facade.
 //
 // Compared to the v1 examples/go/echo demo (which manually wires

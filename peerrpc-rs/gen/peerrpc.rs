@@ -181,7 +181,7 @@ pub mod response_frame {
         End(super::End),
     }
 }
-// PeerRPC wire protocol v2.
+// PeerRPC wire protocol.
 //
 // Two top-level envelope frames are used:
 //    * Frame          - client  -> server

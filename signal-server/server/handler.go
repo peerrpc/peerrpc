@@ -7,18 +7,18 @@ import (
 	"log/slog"
 	"sync"
 
-	signalingpbv2 "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2"
-	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
+	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling"
+	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	"github.com/peerrpc/signal-server/store"
 
 	"connectrpc.com/connect"
 )
 
-// Handler implements peerrpc.signaling.v2.SignalingService on top of
+// Handler implements peerrpc.signaling.SignalingService on top of
 // a store.Store. A single Handler serves any number of concurrent
 // peers and services; construct one per process.
 //
-// Wire format is governed by proto/peerrpc/signaling/v2/signaling.proto
+// Wire format is governed by proto/peerrpc/signaling/signaling.proto
 // and the generated SignalingServiceHandler in peerrpc-go.
 type Handler struct {
 	store  store.Store
@@ -34,7 +34,7 @@ type Config struct {
 
 // New constructs a Handler bound to the given store. The caller
 // is responsible for passing the resulting handler to
-// signalingpbv2connect.NewSignalingServiceHandler and wiring it into
+// signalingpbconnect.NewSignalingServiceHandler and wiring it into
 // the HTTP mux.
 func New(s store.Store, cfg Config) *Handler {
 	logger := cfg.Logger
@@ -53,13 +53,13 @@ type streamGuard struct {
 	recvMu sync.Mutex
 }
 
-func (g *streamGuard) send(stream *connect.BidiStream[signalingpbv2.SignalMessage, signalingpbv2.SignalMessage], msg *signalingpbv2.SignalMessage) error {
+func (g *streamGuard) send(stream *connect.BidiStream[signalingpb.SignalMessage, signalingpb.SignalMessage], msg *signalingpb.SignalMessage) error {
 	g.sendMu.Lock()
 	defer g.sendMu.Unlock()
 	return stream.Send(msg)
 }
 
-func (g *streamGuard) receive(stream *connect.BidiStream[signalingpbv2.SignalMessage, signalingpbv2.SignalMessage]) (*signalingpbv2.SignalMessage, error) {
+func (g *streamGuard) receive(stream *connect.BidiStream[signalingpb.SignalMessage, signalingpb.SignalMessage]) (*signalingpb.SignalMessage, error) {
 	g.recvMu.Lock()
 	defer g.recvMu.Unlock()
 	return stream.Receive()
@@ -78,10 +78,10 @@ func (g *streamGuard) receive(stream *connect.BidiStream[signalingpbv2.SignalMes
 //   - On stream close (peer disconnect, ctx cancel, transport error)
 //     the peer is removed from the service.
 //
-// peer_pubkey (if present) is accepted but not verified; v2.1 will
-// introduce Ed25519 signature verification and propagate the derived
-// PeerID into Identity for downstream authorization.
-func (h *Handler) Exchange(ctx context.Context, stream *connect.BidiStream[signalingpbv2.SignalMessage, signalingpbv2.SignalMessage]) error {
+// peer_pubkey (if present) is accepted but not verified; a future
+// release will introduce Ed25519 signature verification and propagate
+// the derived PeerID into Identity for downstream authorization.
+func (h *Handler) Exchange(ctx context.Context, stream *connect.BidiStream[signalingpb.SignalMessage, signalingpb.SignalMessage]) error {
 	guard := &streamGuard{}
 
 	// First message: must be Announce.
@@ -178,9 +178,9 @@ func (h *Handler) Exchange(ctx context.Context, stream *connect.BidiStream[signa
 	}
 }
 
-// translateInbound wraps a wire v2 SignalMessage into the store's
+// translateInbound wraps a wire SignalMessage into the store's
 // opaque envelope. The store does not inspect Body.
-func translateInbound(msg *signalingpbv2.SignalMessage) (store.SignalMessage, error) {
+func translateInbound(msg *signalingpb.SignalMessage) (store.SignalMessage, error) {
 	if msg == nil || msg.GetBody() == nil {
 		return store.SignalMessage{}, fmt.Errorf("empty body")
 	}
@@ -190,17 +190,17 @@ func translateInbound(msg *signalingpbv2.SignalMessage) (store.SignalMessage, er
 	}, nil
 }
 
-// translateOutbound reconstructs a wire v2 SignalMessage from a
+// translateOutbound reconstructs a wire SignalMessage from a
 // store envelope. The handler sends Body verbatim (it is already a
 // wire-shaped proto).
-func translateOutbound(in store.SignalMessage) (*signalingpbv2.SignalMessage, error) {
-	wire, ok := in.Body.(*signalingpbv2.SignalMessage)
+func translateOutbound(in store.SignalMessage) (*signalingpb.SignalMessage, error) {
+	wire, ok := in.Body.(*signalingpb.SignalMessage)
 	if !ok {
-		return nil, fmt.Errorf("store body is not a v2 SignalMessage")
+		return nil, fmt.Errorf("store body is not a SignalMessage")
 	}
 	return wire, nil
 }
 
-// Assert at compile time that Handler satisfies the generated v2
+// Assert at compile time that Handler satisfies the generated
 // service interface.
-var _ signalingpbv2connect.SignalingServiceHandler = (*Handler)(nil)
+var _ signalingpbconnect.SignalingServiceHandler = (*Handler)(nil)

@@ -24,9 +24,7 @@ pub mod gen {
     include!(concat!(env!("OUT_DIR"), "/peerrpc.rs"));
     // The signaling package.
     pub mod signaling {
-        pub mod v2 {
-            include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.v2.rs"));
-        }
+        include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.rs"));
     }
 }
 
@@ -38,7 +36,7 @@ pub use prost_types;
 pub use gen::{
     Begin, Call, Chunk, Data, End, Frame, Metadata, ResponseFrame, Routing, Strings,
 };
-pub use gen::signaling::v2::{
+pub use gen::signaling::{
     AnnounceRequest, IceCandidate, SdpAnswer, SdpOffer, SignalMessage,
 };
 pub use google::rpc::Status;
