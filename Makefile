@@ -3,7 +3,7 @@ GO   ?= go
 NPM  ?= npm
 CARGO ?= cargo
 
-.PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc
+.PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
 .PHONY: run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-interop-server run-sample
