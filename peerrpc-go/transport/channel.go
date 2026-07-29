@@ -69,8 +69,10 @@ type Channel struct {
 	reasm *Reassembler
 
 	closeOnce sync.Once
+	closeMu   sync.Mutex
 	closed    chan struct{}
 	closeErr  error
+	shutdownDone bool
 }
 
 // assembler collects chunks for one logical message on one stream.
@@ -239,18 +241,32 @@ func (c *Channel) Closed() <-chan struct{} { return c.closed }
 // Close shuts the DataChannel down with a graceful close code.
 // Safe to call multiple times.
 func (c *Channel) Close() error {
+	// closeOnce serializes the dc.Close call so the underlying SCTP
+	// teardown happens exactly once. We do NOT call shutdown from
+	// here: shutdown is fired by the DataChannel's OnClose callback
+	// registered in New(). Calling shutdown inline used to self-
+	// deadlock because shutdown also went through closeOnce.Do.
 	c.closeOnce.Do(func() {
 		_ = c.dc.Close()
-		c.shutdown(errors.New("channel closed by Close"))
 	})
+	// Defensive fallback: if for any reason OnClose does not fire
+	// (e.g. the DataChannel was never fully open), ensure the
+	// shutdown side-effects still run. shutdown is itself
+	// idempotent under closeMu.
+	c.shutdown(errors.New("channel closed by Close"))
 	return nil
 }
 
 func (c *Channel) shutdown(reason error) {
-	c.closeOnce.Do(func() {
-		c.closeErr = reason
-		close(c.closed)
-	})
+	c.closeMu.Lock()
+	if c.shutdownDone {
+		c.closeMu.Unlock()
+		return
+	}
+	c.shutdownDone = true
+	c.closeErr = reason
+	c.closeMu.Unlock()
+	close(c.closed)
 }
 
 // Reassemble collects a Chunk frame into a logical message buffer. When
