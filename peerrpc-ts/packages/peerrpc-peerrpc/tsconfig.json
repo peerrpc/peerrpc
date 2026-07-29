@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../peerrpc-peer" },
+    { "path": "../peerrpc-rpc" },
+    { "path": "../peerrpc-signal" },
+    { "path": "../peerrpc-transport" }
+  ]
+}

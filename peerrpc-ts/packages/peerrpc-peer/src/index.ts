@@ -246,3 +246,123 @@ export async function connectPeers(
   ]);
   return { offerer: och, answerer: ach };
 }
+
+/**
+ * Dial is the Offerer flow over a SignalTransport: create an offer,
+ * pump it through signal, apply the remote answer, drain local ICE
+ * candidates through signal, and resolve once the DataChannel opens.
+ *
+ * The returned Peer must be closed by the caller (or have signal
+ * close underneath) to release the RTCPeerConnection.
+ *
+ * This helper replaces the ~50 lines of manual signal-pump code
+ * previously copy-pasted in every TS example (chat client/main.ts,
+ * echo/main.ts). It is the building block the top-level
+ * @peerrpc/peerrpc facade uses to assemble a full Dial.
+ */
+export async function dial(
+  signal: SignalTransport,
+  cfg: PeerConfig = {},
+): Promise<{ peer: Peer; channel: Channel }> {
+  const peer = new Peer(cfg);
+
+  // Forward local ICE candidates to the remote.
+  peer.onIceCandidate((c) => {
+    if (c) {
+      signal.send({
+        type: "candidate",
+        candidate: c.candidate,
+        sdpMid: c.sdpMid ?? null,
+        sdpMLineIndex: c.sdpMLineIndex ?? null,
+      });
+    }
+  });
+
+  // Apply remote ICE candidates, deferring any that arrive before
+  // remoteDescription is set. Vanilla ICE would simplify this, but
+  // we keep the trickle path so latency-sensitive callers don't
+  // regress.
+  let remoteDescSet = false;
+  const pending: RTCIceCandidateInit[] = [];
+
+  signal.onMessage(async (msg) => {
+    if (msg.type === "answer") {
+      await peer.acceptAnswer(msg.sdp!);
+      remoteDescSet = true;
+      for (const c of pending) {
+        await peer.addCandidate(c);
+      }
+      pending.length = 0;
+    } else if (msg.type === "candidate") {
+      const c: RTCIceCandidateInit = {
+        candidate: msg.candidate ?? "",
+        sdpMid: msg.sdpMid ?? null,
+        sdpMLineIndex: msg.sdpMLineIndex ?? null,
+      };
+      if (remoteDescSet) {
+        await peer.addCandidate(c);
+      } else {
+        pending.push(c);
+      }
+    }
+  });
+
+  const offerSdp = await peer.createOffer();
+  signal.send({ type: "offer", sdp: offerSdp });
+
+  const channel = await peer.waitForChannel();
+  return { peer, channel };
+}
+
+/**
+ * Accept is the Answerer flow over a SignalTransport: wait for an
+ * offer, create an answer, pump it through signal, drain local ICE
+ * candidates through signal, and resolve once the DataChannel opens.
+ *
+ * Mirror of dial for the server side.
+ */
+export async function accept(
+  signal: SignalTransport,
+  cfg: PeerConfig = {},
+): Promise<{ peer: Peer; channel: Channel }> {
+  const peer = new Peer(cfg);
+
+  // Wait for the remote offer via signal, then send our answer.
+  let gotOffer = false;
+  const offerPromise = new Promise<string>((resolve) => {
+    signal.onMessage(async (msg) => {
+      if (msg.type === "offer" && !gotOffer) {
+        gotOffer = true;
+        resolve(msg.sdp!);
+      } else if (msg.type === "candidate" && gotOffer) {
+        // Trickled candidate arriving after we started applying the
+        // offer; the acceptOffer call below will have set remote
+        // description by the time we reach here.
+        await peer.addCandidate({
+          candidate: msg.candidate ?? "",
+          sdpMid: msg.sdpMid ?? null,
+          sdpMLineIndex: msg.sdpMLineIndex ?? null,
+        });
+      }
+    });
+  });
+
+  const offerSdp = await offerPromise;
+  const answerSdp = await peer.acceptOffer(offerSdp);
+  signal.send({ type: "answer", sdp: answerSdp });
+
+  // Forward subsequent local ICE candidates.
+  peer.onIceCandidate((c) => {
+    if (c) {
+      signal.send({
+        type: "candidate",
+        candidate: c.candidate,
+        sdpMid: c.sdpMid ?? null,
+        sdpMLineIndex: c.sdpMLineIndex ?? null,
+      });
+    }
+  });
+
+  const channel = await peer.waitForChannel();
+  return { peer, channel };
+}

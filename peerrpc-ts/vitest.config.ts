@@ -25,7 +25,19 @@ export default defineConfig({
       },
       {
         find: "@peerrpc/rpc",
-        replacement: resolve(__dirname, "packages/peerrpc-rpc/src/index.ts"),
+        replacement: resolve(__dirname, "packages/peerrpc-rpc/src/main.ts"),
+      },
+      {
+        find: "@peerrpc/signal",
+        replacement: resolve(__dirname, "packages/peerrpc-signal/src/index.ts"),
+      },
+      {
+        find: "@peerrpc/peer",
+        replacement: resolve(__dirname, "packages/peerrpc-peer/src/index.ts"),
+      },
+      {
+        find: "@peerrpc/peerrpc",
+        replacement: resolve(__dirname, "packages/peerrpc-peerrpc/src/index.ts"),
       },
     ],
   },
