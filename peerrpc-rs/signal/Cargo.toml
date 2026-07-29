@@ -1,0 +1,11 @@
+[package]
+name = "peerrpc-signal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PeerRPC signaling: backends for SDP/ICE exchange"
+
+[dependencies]
+tokio = { workspace = true, features = ["sync", "rt"] }
+tracing.workspace = true
+thiserror.workspace = true
