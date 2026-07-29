@@ -1,15 +1,9 @@
-//! PeerRPC peer layer: wraps webrtc-rs into a WireTransport.
-//!
-//! The adapter:
-//!   1. Creates an RTCPeerConnection.
-//!   2. Creates or accepts a DataChannel (label = "peerrpc-v1").
-//!   3. Bridges OnMessage → recv_frame and send_frame → Send.
-
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use peerrpc_rpc::WireTransport;
+use peerrpc_signal::{Session, SignalBody, SdpOffer, SdpAnswer, SignalMessage};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
@@ -29,35 +23,44 @@ pub enum PeerError {
     WebRTC(#[from] webrtc::Error),
     #[error("peer: timeout: {0}")]
     Timeout(String),
+    #[error("peer: signal: {0}")]
+    Signal(#[from] peerrpc_signal::SignalError),
 }
 
-/// A connected peer wrapping RTCPeerConnection + DataChannel.
 pub struct Peer {
     #[allow(dead_code)]
     pc: Arc<RTCPeerConnection>,
-    /// For the Offerer flow, dc is set immediately. For the Answerer
-    /// flow, dc_handle is set when on_data_channel fires; the caller
-    /// must call wait_for_data_channel() after sending the answer.
     dc: Option<Arc<RTCDataChannel>>,
     dc_handle: Arc<Mutex<Option<Arc<RTCDataChannel>>>>,
     dc_notify: Arc<Notify>,
+    open_notify: Arc<Notify>,
     inbound_rx: Mutex<mpsc::UnboundedReceiver<Bytes>>,
 }
 
+impl Drop for Peer {
+    fn drop(&mut self) {
+        let pc = self.pc.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let _ = pc.close().await;
+            });
+        }
+    }
+}
+
 impl Peer {
-    /// Offerer flow: create DataChannel + offer.
-    /// Returns (Peer, offer_sdp). Caller must then send the offer
-    /// via signaling, receive the answer, and call set_remote_answer.
     pub async fn create_offer(cfg: RTCConfiguration) -> Result<(Self, String), PeerError> {
         let api = webrtc::api::APIBuilder::new().build();
         let pc = Arc::new(api.new_peer_connection(cfg).await?);
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+        let open_notify = Arc::new(Notify::new());
         let dc = pc
             .create_data_channel(peerrpc_protocol::DATACHANNEL_LABEL, None)
             .await?;
 
         setup_on_message(&dc, inbound_tx);
+        setup_on_open(&dc, open_notify.clone());
 
         let offer = pc.create_offer(None).await?;
         pc.set_local_description(offer).await?;
@@ -74,18 +77,12 @@ impl Peer {
             dc: Some(dc),
             dc_handle: Arc::new(Mutex::new(None)),
             dc_notify: Arc::new(Notify::new()),
+            open_notify,
             inbound_rx: Mutex::new(inbound_rx),
         };
         Ok((peer, sdp))
     }
 
-    /// Answerer flow (two-phase):
-    ///   Phase 1: apply offer + create answer.
-    ///   Phase 2: caller sends the answer, then waits for DataChannel.
-    ///
-    /// Returns (Answerer, answer_sdp). The caller MUST then:
-    ///   1. Send answer_sdp to the remote via signaling.
-    ///   2. Call answerer.wait_for_data_channel().
     pub async fn accept_offer(
         cfg: RTCConfiguration,
         offer_sdp: String,
@@ -97,18 +94,27 @@ impl Peer {
         let dc_handle: Arc<Mutex<Option<Arc<RTCDataChannel>>>> =
             Arc::new(Mutex::new(None));
         let dc_notify = Arc::new(Notify::new());
+        let open_notify = Arc::new(Notify::new());
 
         let tx_cb = inbound_tx.clone();
         let dc_h = dc_handle.clone();
         let notify = dc_notify.clone();
+        let on = open_notify.clone();
         pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
             let tx = tx_cb.clone();
             let h = dc_h.clone();
             let n = notify.clone();
+            let open = on.clone();
             dc.on_message(Box::new(move |msg: DataChannelMessage| {
                 let tx = tx.clone();
                 Box::pin(async move {
                     let _ = tx.send(Bytes::copy_from_slice(&msg.data));
+                })
+            }));
+            dc.on_open(Box::new(move || {
+                let n = open.clone();
+                Box::pin(async move {
+                    n.notify_waiters();
                 })
             }));
             Box::pin(async move {
@@ -132,16 +138,15 @@ impl Peer {
 
         let peer = Self {
             pc,
-            dc: None, // set by wait_for_data_channel
+            dc: None,
             dc_handle,
             dc_notify,
+            open_notify,
             inbound_rx: Mutex::new(inbound_rx),
         };
         Ok((peer, sdp))
     }
 
-    /// Wait for the remote to open the DataChannel. Called AFTER the
-    /// answer has been sent via signaling.
     pub async fn wait_for_data_channel(&self, timeout: Duration) -> Result<Arc<RTCDataChannel>, PeerError> {
         tokio::time::timeout(timeout, self.dc_notify.notified())
             .await
@@ -154,7 +159,6 @@ impl Peer {
             .ok_or_else(|| PeerError::Other("no DC after notify".into()))
     }
 
-    /// Set the remote answer (Offerer side).
     pub async fn set_remote_answer(&self, sdp: String) -> Result<(), PeerError> {
         self.pc
             .set_remote_description(RTCSessionDescription::answer(sdp)?)
@@ -162,19 +166,78 @@ impl Peer {
         Ok(())
     }
 
-    /// Close the PeerConnection.
+    pub async fn wait_for_open(&self, timeout: Duration) -> Result<(), PeerError> {
+        tokio::time::timeout(timeout, self.open_notify.notified())
+            .await
+            .map_err(|_| PeerError::Timeout("DataChannel open".into()))?;
+        Ok(())
+    }
+
     pub async fn close(&self) -> Result<(), PeerError> {
         self.pc.close().await?;
         Ok(())
+    }
+
+    pub async fn dial(
+        cfg: RTCConfiguration,
+        mut sig: Session,
+        timeout: Duration,
+    ) -> Result<Self, PeerError> {
+        let (peer, offer_sdp) = Self::create_offer(cfg).await?;
+
+        sig.send(SignalMessage {
+            room_id: sig.room_id().to_string(),
+            body: SignalBody {
+                offer: Some(SdpOffer { sdp: offer_sdp }),
+                ..Default::default()
+            },
+        })?;
+
+        while let Some(msg) = sig.recv().await {
+            if let Some(answer) = msg.body.answer {
+                peer.set_remote_answer(answer.sdp).await?;
+                break;
+            }
+        }
+
+        peer.wait_for_open(timeout).await?;
+        Ok(peer)
+    }
+
+    pub async fn accept(
+        cfg: RTCConfiguration,
+        mut sig: Session,
+        timeout: Duration,
+    ) -> Result<Self, PeerError> {
+        let offer_sdp = loop {
+            match sig.recv().await {
+                Some(msg) if msg.body.offer.is_some() => {
+                    break msg.body.offer.unwrap().sdp;
+                }
+                Some(_) => continue,
+                None => return Err(PeerError::Other("signal session closed before offer".into())),
+            }
+        };
+
+        let (peer, answer_sdp) = Self::accept_offer(cfg, offer_sdp).await?;
+
+        sig.send(SignalMessage {
+            room_id: sig.room_id().to_string(),
+            body: SignalBody {
+                answer: Some(SdpAnswer { sdp: answer_sdp }),
+                ..Default::default()
+            },
+        })?;
+
+        peer.wait_for_open(timeout).await?;
+        peer.wait_for_data_channel(timeout).await?;
+        Ok(peer)
     }
 }
 
 #[async_trait]
 impl WireTransport for Peer {
     async fn send_frame(&mut self, frame: Bytes) {
-        // For the Offerer flow, dc is set. For the Answerer flow,
-        // the caller must call wait_for_data_channel first, which
-        // populates dc_handle. We try dc first, then dc_handle.
         if let Some(dc) = &self.dc {
             let _ = dc.send(&frame).await;
             return;
@@ -194,6 +257,15 @@ fn setup_on_message(dc: &Arc<RTCDataChannel>, tx: mpsc::UnboundedSender<Bytes>) 
         let tx = tx.clone();
         Box::pin(async move {
             let _ = tx.send(Bytes::copy_from_slice(&msg.data));
+        })
+    }));
+}
+
+fn setup_on_open(dc: &Arc<RTCDataChannel>, notify: Arc<Notify>) {
+    dc.on_open(Box::new(move || {
+        let n = notify.clone();
+        Box::pin(async move {
+            n.notify_waiters();
         })
     }));
 }

@@ -8,6 +8,7 @@ description = "PeerRPC peer layer: webrtc-rs PeerConnection + DataChannel adapte
 [dependencies]
 peerrpc-protocol.workspace = true
 peerrpc-rpc = { path = "../rpc" }
+peerrpc-signal.workspace = true
 webrtc = "0.11"
 tokio = { workspace = true, features = ["full"] }
 bytes.workspace = true

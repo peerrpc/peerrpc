@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "transport", "rpc", "peer", "signal"]
+members = ["protocol", "transport", "rpc", "peer", "signal", "examples/echo"]
 resolver = "2"
 
 [workspace.package]
@@ -17,3 +17,5 @@ thiserror = "2"
 peerrpc-protocol = { path = "protocol" }
 peerrpc-transport = { path = "transport" }
 peerrpc-signal = { path = "signal" }
+peerrpc-rpc = { path = "rpc" }
+peerrpc-peer = { path = "peer" }
