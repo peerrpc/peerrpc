@@ -27,6 +27,13 @@ pub enum MethodKind {
 pub struct MethodDesc {
     pub method: String,
     pub kind: MethodKind,
+    // Handler takes the ServerStream by value so the resulting future
+    // can be 'static (the stream's owned state travels into the
+    // task). recv() and send() take &self: ServerStream hides its
+    // single mutable receiver behind an async Mutex so the API
+    // matches Go's *ServerStream ergonomics — the handler body
+    // becomes `|s: ServerStream| { let r = s.recv().await; s.send(r).await; }`
+    // without borrow-checker gymnastics.
     pub handler: Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sync>,
 }
 
@@ -140,17 +147,23 @@ impl Server {
                 }
 
                 let handler = method.handler;
-                let stream = ServerStream {
-                    seq,
-                    method: call.method,
-                    inbound: inbound_rx,
-                    half_close,
-                    resp_tx: resp_tx.clone(),
-                    header_sent: AtomicBool::new(false),
-                };
-
                 let tx = resp_tx.clone();
+                let stream_resp_tx = resp_tx.clone();
                 tokio::spawn(async move {
+                    // The ServerStream travels by value into this
+                    // task. handler(&mut stream) was the original
+                    // plan, but BoxFuture is 'static and can't hold
+                    // an &'a mut borrow. We hand the stream by value
+                    // to the handler; recv() and send() take &self
+                    // so the body looks like Go's *ServerStream.
+                    let stream = ServerStream {
+                        seq,
+                        method: call.method,
+                        inbound: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
+                        half_close,
+                        resp_tx: stream_resp_tx,
+                        header_sent: AtomicBool::new(false),
+                    };
                     let status = handler(stream).await;
                     let end = peerrpc_protocol::ResponseFrame {
                         routing: Some(Routing { sequence: seq }),
@@ -231,7 +244,12 @@ struct StreamState {
 pub struct ServerStream {
     seq: i32,
     method: String,
-    inbound: mpsc::Receiver<Vec<u8>>,
+    // Arc<Mutex<...>> so recv() can take &self. Without this, the
+    // owned mpsc::Receiver would force recv(&mut self), which
+    // cascades to handler(&mut ServerStream), which can't be paired
+    // with a 'static future (the &'a mut borrow can't escape the
+    // function frame).
+    inbound: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
     half_close: Arc<Notify>,
     resp_tx: mpsc::UnboundedSender<RespFrame>,
     header_sent: AtomicBool,
@@ -242,9 +260,10 @@ impl ServerStream {
         &self.method
     }
 
-    pub async fn recv(&mut self) -> Option<Vec<u8>> {
+    pub async fn recv(&self) -> Option<Vec<u8>> {
+        let mut guard = self.inbound.lock().await;
         tokio::select! {
-            data = self.inbound.recv() => data,
+            data = guard.recv() => data,
             _ = self.half_close.notified() => None,
         }
     }

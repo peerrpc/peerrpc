@@ -89,8 +89,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn unary_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sync> {
-    Arc::new(|mut s: ServerStream| {
+    Arc::new(|s: ServerStream| {
         Box::pin(async move {
+            // recv() and send() take &self, so the by-value stream
+            // can be used directly without `mut` binding or borrow-
+            // checker gymnastics. Mirrors Go's *ServerStream shape.
             match s.recv().await {
                 Some(req) => {
                     let resp = [b"echo: ", &req[..]].concat();
@@ -106,7 +109,7 @@ fn unary_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Syn
 }
 
 fn stream_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sync> {
-    Arc::new(|mut s: ServerStream| {
+    Arc::new(|s: ServerStream| {
         Box::pin(async move {
             let req = s.recv().await.unwrap_or_default();
             let req_str = String::from_utf8_lossy(&req);

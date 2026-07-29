@@ -36,15 +36,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         methods: vec![MethodDesc {
                             method: "Unary".into(),
                             kind: MethodKind::Unary,
-                            handler: Arc::new(|stream: ServerStream| {
+                            handler: Arc::new(|s: ServerStream| {
                                 Box::pin(async move {
-                                    // Send one fixed response; enough to
-                                    // exercise the wire round trip
-                                    // without tangling with the
-                                    // ServerStream recv borrow rules.
-                                    // A fuller echo lives in
-                                    // examples/echo.
-                                    if let Err(e) = stream.send(b"echo: peerrpc".to_vec()).await {
+                                    // Full echo: recv → prefix → send.
+                                    // Made natural by the &self API
+                                    // on recv/send (no `mut` needed,
+                                    // no borrow-checker fights).
+                                    let req = match s.recv().await {
+                                        Some(b) => b,
+                                        None => return Status { code: 13, message: "empty request".into() },
+                                    };
+                                    let mut resp = Vec::with_capacity(6 + req.len());
+                                    resp.extend_from_slice(b"echo: ");
+                                    resp.extend_from_slice(&req);
+                                    if let Err(e) = s.send(resp).await {
                                         return Status { code: 13, message: e };
                                     }
                                     Status::ok()
