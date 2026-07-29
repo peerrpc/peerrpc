@@ -47,7 +47,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	peer := store.Peer{ID: join.PeerID, RoomID: join.RoomID}
+	peer := store.Peer{ID: join.PeerID, Service: join.RoomID}
 	sx, rx, err := h.store.Join(context.Background(), peer)
 	if err != nil {
 		h.logger.Error("ws store join failed", "err", err, "room_id", join.RoomID, "peer_id", join.PeerID)
@@ -103,7 +103,7 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := sx.Send(context.Background(), store.SignalMessage{
-			RoomID:   join.RoomID,
+			Service:  join.RoomID,
 			SenderID: join.PeerID,
 			Body:     &msg,
 		}); err != nil {

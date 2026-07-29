@@ -1,11 +1,17 @@
 // Command peerrpc-signal runs the standalone PeerRPC signaling server.
 //
-// It exposes peerrpc.signaling.v1.SignalingService over HTTP. Thanks
-// to connect-go a single handler transparently serves:
+// It exposes both peerrpc.signaling.v1.SignalingService and
+// peerrpc.signaling.v2.SignalingService over HTTP. Thanks to
+// connect-go a single handler per version transparently serves:
 //
 //   - Connect clients (connect-go / @connectrpc/connect-web)
 //   - gRPC clients (grpc-go)
 //   - gRPC-Web clients (browsers, no Envoy required)
+//
+// The v1 and v2 handlers share one in-memory store, so a v1 client
+// joining room "X" and a v2 client announcing against service "X"
+// rendezvous in the same store entry. v1 will be removed two
+// releases after v2 GA; until then both paths are maintained.
 //
 // Usage:
 //
@@ -30,6 +36,7 @@ import (
 	"time"
 
 	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v1/signalingpbconnect"
+	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
@@ -54,6 +61,7 @@ func main() {
 
 	mem := store.NewMemory()
 	svc := server.New(mem, server.Config{Logger: logger})
+	svcV2 := server.NewV2(mem, server.Config{Logger: logger})
 
 	var opts []connect.HandlerOption
 	switch {
@@ -82,8 +90,18 @@ func main() {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
-	mux.Handle(path, handler)
+	// v1 handler: retains room_id semantics for existing clients.
+	// Removal is scheduled for two releases after v2 GA.
+	v1Path, v1Handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
+	mux.Handle(v1Path, v1Handler)
+	// v2 handler: room_id replaced by service, JoinRequest replaced
+	// by AnnounceRequest, new ROLE_RELAY / ROLE_BRIDGE.
+	v2Path, v2Handler := signalingpbv2connect.NewSignalingServiceHandler(svcV2, opts...)
+	mux.Handle(v2Path, v2Handler)
+	logger.Info("registered signaling handlers",
+		"v1_path", v1Path,
+		"v2_path", v2Path,
+	)
 	mux.HandleFunc("/ws", svc.ServeWS)
 
 	// /healthz for liveness probes; the handler does not need a store

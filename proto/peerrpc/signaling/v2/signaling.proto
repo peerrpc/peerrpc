@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package peerrpc.signaling.v2;
+
+option go_package = "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2;signalingpbv2";
+
+// SignalingService is the v2 rendezvous service used by two PeerRPC
+// nodes to exchange WebRTC SDP offers/answers and ICE candidates
+// before a DataChannel is established.
+//
+// v2 replaces v1's room_id with service, JoinRequest with
+// AnnounceRequest, and ROLE_OFFERER/ROLE_ANSWERER with
+// ROLE_CLIENT/ROLE_SERVER (the WebRTC offerer is now an internal
+// SDK concern, not a signaling-layer concept). New ROLE_RELAY and
+// ROLE_BRIDGE values let the server distinguish relay and bridge
+// nodes from ordinary peers.
+//
+// The optional peer_pubkey field is reserved for v2.1's Ed25519
+// strong-identity feature; v2 servers MUST accept it but MAY ignore
+// it.
+service SignalingService {
+  // Exchange is a bidirectional stream. A client announces itself
+  // against a service and then exchanges offer / answer / candidate
+  // messages with other peers in the same service until either side
+  // closes the stream or the service entry is destroyed.
+  rpc Exchange(stream SignalMessage) returns (stream SignalMessage);
+}
+
+// SignalMessage is the single envelope on the Exchange stream.
+// Exactly one field of `body` is set per message.
+message SignalMessage {
+  // service is the rendezvous key. Two peers wishing to establish a
+  // DataChannel MUST announce against the same service.
+  //
+  // v1 equivalent: room_id. The rename reflects that v2 is always a
+  // two-party rendezvous, not a multi-party room.
+  string service = 1;
+
+  oneof body {
+    AnnounceRequest announce  = 2;
+    SdpOffer        offer     = 3;
+    SdpAnswer       answer    = 4;
+    IceCandidate    candidate = 5;
+    LeaveRequest    leave     = 6;
+    Ping            ping      = 7;
+  }
+}
+
+// AnnounceRequest is the first message a peer sends on the Exchange
+// stream. It registers the peer against the requested service.
+//
+// Auth is enforced server-side via a Connect interceptor that
+// validates the Authorization header before the stream is admitted.
+//
+// v1 equivalent: JoinRequest. The rename reflects intent ("declare
+// presence" rather than "enter a room").
+message AnnounceRequest {
+  // peer_id is the caller-chosen identifier for itself within the
+  // service. The server MAY reject duplicates.
+  //
+  // When the SDK uses peerrpc.Dial/Listen without an explicit
+  // peer_id, it generates a UUIDv7 here.
+  string peer_id = 1;
+
+  // peer_pubkey carries an Ed25519 public key when the peer opts
+  // into the strong-identity model. v2 servers MUST accept this
+  // field but MAY ignore it; full verification ships in v2.1.
+  optional bytes peer_pubkey = 2;
+
+  Role role = 3;
+
+  // Role disambiguates the peer's application-level part.
+  //
+  // v1's ROLE_OFFERER/ROLE_ANSWERER are replaced because the WebRTC
+  // offer direction is now derived by the SDK (offerer = the side
+  // that calls Dial) and is no longer a signaling concern.
+  //
+  // New ROLE_RELAY / ROLE_BRIDGE values let the server identify
+  // relay-server and grpcbridge-server peers and apply differentiated
+  // policy (e.g. prevent two relays in the same service).
+  enum Role {
+    ROLE_UNSPECIFIED = 0;
+    ROLE_CLIENT      = 1;
+    ROLE_SERVER      = 2;
+    ROLE_RELAY       = 3;
+    ROLE_BRIDGE      = 4;
+  }
+}
+
+// SdpOffer carries a WebRTC SessionDescription of type "offer".
+message SdpOffer {
+  string sdp = 1;
+}
+
+// SdpAnswer carries a WebRTC SessionDescription of type "answer".
+message SdpAnswer {
+  string sdp = 1;
+}
+
+// IceCandidate carries a single ICE candidate (serialized per the
+// WebRTC RTCIceCandidateInit dictionary).
+message IceCandidate {
+  // candidate is the raw candidate string.
+  string candidate = 1;
+  // sdp_mid is the media stream identification tag.
+  string sdp_mid = 2;
+  // sdp_mline_index is the zero-based index of the m-line.
+  uint32 sdp_mline_index = 3;
+}
+
+// LeaveRequest signals graceful departure from the service.
+message LeaveRequest {
+  string reason = 1;
+}
+
+// Ping is a liveness probe; the server echoes it back as a Ping
+// with the same payload.
+message Ping {
+  int64 timestamp_ms = 1;
+}

@@ -6,110 +6,118 @@ import (
 	"time"
 )
 
-// MaxPeersPerRoom caps how many peers may join the same room.
+// MaxPeersPerService caps how many peers may join the same service.
 //
-// PeerRPC supports one Answerer (server) serving multiple Offerers
-// (clients) in the same room. The cap prevents pathological fan-out.
-const MaxPeersPerRoom = 10
+// PeerRPC supports one Server serving multiple Clients in the same
+// service. The cap prevents pathological fan-out.
+//
+// MaxPeersPerRoom is retained as a deprecated alias; new code should
+// use MaxPeersPerService.
+const MaxPeersPerService = 10
+
+// Deprecated: use MaxPeersPerService. Removal scheduled for the
+// second release after v2 GA.
+const MaxPeersPerRoom = MaxPeersPerService
 
 // Memory is an in-process Store. It is the default for the
 // standalone signal-server binary and the only backend v1 ships.
 //
 // Memory is safe for concurrent use by any number of peers and
-// rooms. Empty rooms are garbage-collected so a server that handles
-// many short-lived rooms does not leak.
+// services. Empty services are garbage-collected so a server that
+// handles many short-lived services does not leak.
 type Memory struct {
-	mu    sync.Mutex
-	rooms map[string]*memoryRoom
+	mu       sync.Mutex
+	services map[string]*memoryService
 }
 
 // NewMemory constructs an empty in-memory store.
 func NewMemory() *Memory {
-	return &Memory{rooms: make(map[string]*memoryRoom)}
+	return &Memory{services: make(map[string]*memoryService)}
 }
 
-type memoryRoom struct {
+type memoryService struct {
 	mu    sync.Mutex
 	peers map[string]*memoryPeer
 }
 
 type memoryPeer struct {
-	id     string
-	roomID string
-	inbox  chan SignalMessage
-	// inboxClosed avoids double-close panics when Leave races with
-	// the room's own teardown.
+	id      string
+	service string
+	inbox   chan SignalMessage
+	// inboxClosed avoids double-close panics when Leave races
+	// with the service's own teardown.
 	inboxClosed bool
 	closeMu     sync.Mutex
 }
 
 // Join implements Store.
 func (m *Memory) Join(ctx context.Context, peer Peer) (Sender, Receiver, error) {
-	if peer.RoomID == "" {
+	if peer.Service == "" {
 		return nil, nil, ErrPeerAlreadyExists // sentinel: invalid input
 	}
 	if peer.ID == "" {
 		return nil, nil, ErrPeerAlreadyExists
 	}
 
-	room := m.roomForJoin(peer.RoomID)
+	svc := m.serviceForJoin(peer.Service)
 
-	room.mu.Lock()
-	if _, exists := room.peers[peer.ID]; exists {
-		room.mu.Unlock()
+	svc.mu.Lock()
+	if _, exists := svc.peers[peer.ID]; exists {
+		svc.mu.Unlock()
 		return nil, nil, ErrPeerAlreadyExists
 	}
-	if len(room.peers) >= MaxPeersPerRoom {
-		room.mu.Unlock()
-		return nil, nil, ErrRoomFull
+	if len(svc.peers) >= MaxPeersPerService {
+		svc.mu.Unlock()
+		return nil, nil, ErrServiceFull
 	}
 	mp := &memoryPeer{
-		id:     peer.ID,
-		roomID: peer.RoomID,
+		id:      peer.ID,
+		service: peer.Service,
 		// 32 is plenty: signaling exchanges a handful of SDP/ICE
 		// frames; buffered so a slow receiver does not block the
 		// broadcaster during a brief burst.
 		inbox: make(chan SignalMessage, 32),
 	}
-	room.peers[peer.ID] = mp
-	room.mu.Unlock()
+	svc.peers[peer.ID] = mp
+	svc.mu.Unlock()
 
-	sender := &memorySender{store: m, peer: mp, room: room}
+	sender := &memorySender{store: m, peer: mp, service: svc}
 	receiver := &memoryReceiver{inbox: mp.inbox}
 	return sender, receiver, nil
 }
 
-// roomForJoin returns the room for roomID, creating an empty one if
-// needed. Callers MUST take room.mu themselves before mutating peers.
-func (m *Memory) roomForJoin(roomID string) *memoryRoom {
+// serviceForJoin returns the service for serviceID, creating an
+// empty one if needed. Callers MUST take svc.mu themselves before
+// mutating peers.
+func (m *Memory) serviceForJoin(serviceID string) *memoryService {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	r, ok := m.rooms[roomID]
+	s, ok := m.services[serviceID]
 	if !ok {
-		r = &memoryRoom{peers: make(map[string]*memoryPeer)}
-		m.rooms[roomID] = r
+		s = &memoryService{peers: make(map[string]*memoryPeer)}
+		m.services[serviceID] = s
 	}
-	return r
+	return s
 }
 
 // Leave implements Store.
 func (m *Memory) Leave(_ context.Context, peer Peer) error {
 	m.mu.Lock()
-	room, ok := m.rooms[peer.RoomID]
+	svc, ok := m.services[peer.Service]
 	m.mu.Unlock()
 	if !ok {
 		return nil
 	}
 
-	room.mu.Lock()
-	mp, ok := room.peers[peer.ID]
+	svc.mu.Lock()
+	mp, ok := svc.peers[peer.ID]
 	if !ok {
-		room.mu.Unlock()
+		svc.mu.Unlock()
 		return nil
 	}
-	delete(room.peers, peer.ID)
-	empty := len(room.peers) == 0
-	room.mu.Unlock()
+	delete(svc.peers, peer.ID)
+	empty := len(svc.peers) == 0
+	svc.mu.Unlock()
 
 	mp.closeMu.Lock()
 	if !mp.inboxClosed {
@@ -122,8 +130,8 @@ func (m *Memory) Leave(_ context.Context, peer Peer) error {
 		m.mu.Lock()
 		// Re-check to avoid a race where another peer joined
 		// between our snapshot and the lock acquisition.
-		if r, still := m.rooms[peer.RoomID]; still && len(r.peers) == 0 {
-			delete(m.rooms, peer.RoomID)
+		if s, still := m.services[peer.Service]; still && len(s.peers) == 0 {
+			delete(m.services, peer.Service)
 		}
 		m.mu.Unlock()
 	}
@@ -136,35 +144,38 @@ func (m *Memory) Stats() Stats {
 	defer m.mu.Unlock()
 
 	out := Stats{
-		Rooms:     len(m.rooms),
-		RoomPeers: map[string]int{},
+		Services:     len(m.services),
+		ServicePeers: map[string]int{},
 	}
-	for id, r := range m.rooms {
-		r.mu.Lock()
-		n := len(r.peers)
-		r.mu.Unlock()
-		out.RoomPeers[id] = n
+	for id, s := range m.services {
+		s.mu.Lock()
+		n := len(s.peers)
+		s.mu.Unlock()
+		out.ServicePeers[id] = n
 		out.Peers += n
 	}
+	// Backfill deprecated aliases.
+	out.Rooms = out.Services
+	out.RoomPeers = out.ServicePeers
 	return out
 }
 
-// memorySender broadcasts messages from one peer to its room.
+// memorySender broadcasts messages from one peer to its service.
 type memorySender struct {
-	store *Memory
-	peer  *memoryPeer
-	room  *memoryRoom
+	store   *Memory
+	peer    *memoryPeer
+	service *memoryService
 }
 
 // Send implements Sender. Non-blocking on slow receivers; overflow
 // drops rather than back-pressures the broadcaster.
 func (s *memorySender) Send(ctx context.Context, msg SignalMessage) error {
 	msg.SenderID = s.peer.id
-	msg.RoomID = s.peer.roomID
+	msg.Service = s.peer.service
 
-	s.room.mu.Lock()
-	defer s.room.mu.Unlock()
-	for id, mp := range s.room.peers {
+	s.service.mu.Lock()
+	defer s.service.mu.Unlock()
+	for id, mp := range s.service.peers {
 		if id == s.peer.id {
 			continue
 		}
@@ -182,7 +193,7 @@ func (s *memorySender) Send(ctx context.Context, msg SignalMessage) error {
 func (s *memorySender) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.store.Leave(ctx, Peer{ID: s.peer.id, RoomID: s.peer.roomID})
+	return s.store.Leave(ctx, Peer{ID: s.peer.id, Service: s.peer.service})
 }
 
 // memoryReceiver adapts a peer's inbox chan into the Receiver

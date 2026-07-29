@@ -12,8 +12,8 @@ import (
 func TestMemory_JoinLeave(t *testing.T) {
 	s := store.NewMemory()
 
-	alice := store.Peer{ID: "alice", RoomID: "r1"}
-	bob := store.Peer{ID: "bob", RoomID: "r1"}
+	alice := store.Peer{ID: "alice", Service: "r1"}
+	bob := store.Peer{ID: "bob", Service: "r1"}
 
 	_, arx, err := s.Join(context.Background(), alice)
 	if err != nil {
@@ -24,7 +24,7 @@ func TestMemory_JoinLeave(t *testing.T) {
 		t.Fatalf("bob Join: %v", err)
 	}
 
-	if stats := s.Stats(); stats.Rooms != 1 || stats.Peers != 2 {
+	if stats := s.Stats(); stats.Services != 1 || stats.Peers != 2 {
 		t.Fatalf("Stats after joins: %+v", stats)
 	}
 
@@ -63,14 +63,14 @@ func TestMemory_JoinLeave(t *testing.T) {
 		t.Fatal("bob inbox never closed")
 	}
 
-	if stats := s.Stats(); stats.Rooms != 0 || stats.Peers != 0 {
+	if stats := s.Stats(); stats.Services != 0 || stats.Peers != 0 {
 		t.Fatalf("Stats after leaves: %+v", stats)
 	}
 }
 
 func TestMemory_DuplicatePeerRejected(t *testing.T) {
 	s := store.NewMemory()
-	p := store.Peer{ID: "x", RoomID: "r"}
+	p := store.Peer{ID: "x", Service: "r"}
 	if _, _, err := s.Join(context.Background(), p); err != nil {
 		t.Fatalf("first Join: %v", err)
 	}
@@ -79,24 +79,24 @@ func TestMemory_DuplicatePeerRejected(t *testing.T) {
 	}
 }
 
-func TestMemory_RoomFullRejected(t *testing.T) {
+func TestMemory_ServiceFullRejected(t *testing.T) {
 	s := store.NewMemory()
-	for i := 0; i < store.MaxPeersPerRoom; i++ {
-		p := store.Peer{ID: string(rune('a' + i)), RoomID: "r"}
+	for i := 0; i < store.MaxPeersPerService; i++ {
+		p := store.Peer{ID: string(rune('a' + i)), Service: "r"}
 		if _, _, err := s.Join(context.Background(), p); err != nil {
 			t.Fatalf("Join %d: %v", i, err)
 		}
 	}
-	p := store.Peer{ID: "extra", RoomID: "r"}
-	if _, _, err := s.Join(context.Background(), p); !errors.Is(err, store.ErrRoomFull) {
-		t.Fatalf("got %v, want ErrRoomFull", err)
+	p := store.Peer{ID: "extra", Service: "r"}
+	if _, _, err := s.Join(context.Background(), p); !errors.Is(err, store.ErrServiceFull) {
+		t.Fatalf("got %v, want ErrServiceFull", err)
 	}
 }
 
 func TestMemory_BroadcastNoEcho(t *testing.T) {
 	s := store.NewMemory()
-	alice := store.Peer{ID: "alice", RoomID: "r"}
-	bob := store.Peer{ID: "bob", RoomID: "r"}
+	alice := store.Peer{ID: "alice", Service: "r"}
+	bob := store.Peer{ID: "bob", Service: "r"}
 
 	asx, arx, err := s.Join(context.Background(), alice)
 	if err != nil {

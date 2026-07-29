@@ -102,7 +102,7 @@ func (h *Handler) Exchange(ctx context.Context, stream *connect.BidiStream[signa
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("room_id and peer_id are required"))
 	}
 
-	peer := store.Peer{ID: peerID, RoomID: roomID}
+	peer := store.Peer{ID: peerID, Service: roomID}
 	sx, rx, err := h.store.Join(ctx, peer)
 	if err != nil {
 		if errors.Is(err, store.ErrPeerAlreadyExists) {
@@ -195,8 +195,8 @@ func translateInbound(msg *signalingpb.SignalMessage) (store.SignalMessage, erro
 		return store.SignalMessage{}, fmt.Errorf("empty body")
 	}
 	return store.SignalMessage{
-		RoomID: msg.GetRoomId(),
-		Body:   msg,
+		Service: msg.GetRoomId(),
+		Body:    msg,
 	}, nil
 }
 
