@@ -26,7 +26,7 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v1/signalingpbconnect"
+	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
 	"github.com/peerrpc/go/peer"
 	"github.com/peerrpc/go/rpc"
 	signalsdk "github.com/peerrpc/go/signal"
@@ -140,7 +140,7 @@ func main() {
 	signalSrv := server.New(store.NewMemory(), server.Config{Logger: logger})
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(signalSrv)
+	path, handler := signalingpbv2connect.NewSignalingServiceHandler(signalSrv)
 	mux.Handle(path, handler)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -249,7 +249,7 @@ func runOfferer(ctx context.Context, backend signalsdk.Backend, hub *signalHub, 
 			continue
 		}
 
-		p, err := peer.New(ctx, signalsdk.RoleOfferer, peer.Config{
+		p, err := peer.New(ctx, signalsdk.RoleClient, peer.Config{
 			NegotiationTimeout: 30 * time.Second,
 		})
 		if err != nil {

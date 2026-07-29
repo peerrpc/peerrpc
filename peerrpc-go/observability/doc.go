@@ -34,6 +34,6 @@ const (
 	keyStatusCode = "status_code"
 	keyDuration   = "duration_ms"
 	keyPeerID     = "peer_id"
-	keyRoomID     = "room_id"
+	keyService    = "service"
 	keyError      = "err"
 )

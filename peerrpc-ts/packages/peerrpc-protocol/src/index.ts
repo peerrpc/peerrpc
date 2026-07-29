@@ -118,4 +118,4 @@ export function newResponseFrame(init?: Partial<ResponseFrame>): ResponseFrame {
 
 // Re-export all generated types for caller convenience.
 export * from "./gen/peerrpc/peerrpc_pb.js";
-export * from "./gen/peerrpc/signaling/v1/signaling_pb.js";
+export * from "./gen/peerrpc/signaling/v2/signaling_pb.js";

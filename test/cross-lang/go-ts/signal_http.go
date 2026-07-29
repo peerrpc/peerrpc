@@ -149,10 +149,10 @@ func (h *signalHub) pumpFromBackend(ctx context.Context, sig *signal.Session) {
 			// Buffer offers for late SSE subscribers.
 			if translated.Type == "offer" {
 				h.mu.Lock()
-				h.lastOffer[msg.RoomID] = translated
+				h.lastOffer[msg.Service] = translated
 				h.mu.Unlock()
 			}
-			h.publish(msg.RoomID, translated)
+			h.publish(msg.Service, translated)
 		case <-ctx.Done():
 			return
 		}
@@ -178,7 +178,7 @@ func translateBackendToJSON(msg *signal.SignalMessage) jsonSignalMsg {
 }
 
 func translateJSONToBackend(msg jsonSignalMsg, roomID string) *signal.SignalMessage {
-	sm := &signal.SignalMessage{RoomID: roomID}
+	sm := &signal.SignalMessage{Service: roomID}
 	switch msg.Type {
 	case "offer":
 		sm.Body = signal.SignalBody{Offer: &signal.SdpOffer{Sdp: msg.Sdp}}

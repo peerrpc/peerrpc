@@ -111,7 +111,7 @@ func dialRelayPeer(t *testing.T, ctx context.Context, backend signal.Backend, ro
 	if err != nil {
 		t.Fatalf("%s signaling: %v", peerID, err)
 	}
-	p, err := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	p, err := peer.New(ctx, signal.RoleClient, peer.Config{})
 	if err != nil {
 		t.Fatalf("%s peer.New: %v", peerID, err)
 	}

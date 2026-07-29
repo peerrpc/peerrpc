@@ -146,12 +146,12 @@ func spinUp(t *testing.T, srv *rpc.Server) (*rpc.Client, func()) {
 		t.Fatalf("answerer sig: %v", err)
 	}
 
-	oPeer, err := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	oPeer, err := peer.New(ctx, signal.RoleClient, peer.Config{})
 	if err != nil {
 		cancel()
 		t.Fatalf("offerer New: %v", err)
 	}
-	aPeer, err := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	aPeer, err := peer.New(ctx, signal.RoleServer, peer.Config{})
 	if err != nil {
 		cancel()
 		t.Fatalf("answerer New: %v", err)

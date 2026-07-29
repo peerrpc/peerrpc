@@ -35,7 +35,7 @@ remote Connect (or gRPC) service URL over HTTP.`,
 var bridgeFlags struct {
 	upstream      string
 	signalAddr    string
-	roomID        string
+	service        string
 	peerID        string
 	role          string
 	services      []string
@@ -46,13 +46,13 @@ func init() {
 	f := bridgeCmd.Flags()
 	f.StringVar(&bridgeFlags.upstream, "upstream", "", "Connect service base URL")
 	f.StringVar(&bridgeFlags.signalAddr, "signal", "", "signal server base URL")
-	f.StringVar(&bridgeFlags.roomID, "room", "", "signaling room id")
+	f.StringVar(&bridgeFlags.service, "service", "", "signaling service id")
 	f.StringVar(&bridgeFlags.peerID, "peer-id", "bridge", "peer id")
 	f.StringVar(&bridgeFlags.role, "role", "answerer", "peer role (offerer|answerer)")
 	f.StringArrayVar(&bridgeFlags.services, "service", nil, `unary service spec "Name:Method1,Method2"`)
 	f.StringArrayVar(&bridgeFlags.streamServices, "stream-service", nil, `server-streaming service spec "Name:Method1,Method2"`)
 	_ = bridgeCmd.MarkFlagRequired("upstream")
-	_ = bridgeCmd.MarkFlagRequired("room")
+	_ = bridgeCmd.MarkFlagRequired("service")
 }
 
 func runBridge(_ *cobra.Command, _ []string) error {
@@ -97,7 +97,7 @@ func runBridge(_ *cobra.Command, _ []string) error {
 		logger.Info("using in-process signaling")
 	}
 
-	sig, err := backend.Exchange(context.Background(), bridgeFlags.roomID, bridgeFlags.peerID)
+	sig, err := backend.Exchange(context.Background(), bridgeFlags.service, bridgeFlags.peerID)
 	if err != nil {
 		logger.Error("signaling exchange", "err", err)
 		return err
@@ -122,13 +122,13 @@ func runBridge(_ *cobra.Command, _ []string) error {
 
 	logger.Info("bridge starting",
 		"upstream", bridgeFlags.upstream,
-		"room_id", bridgeFlags.roomID,
+		"service", bridgeFlags.service,
 		"peer_id", bridgeFlags.peerID,
 		"role", r,
 	)
 
 	var ch *transport.Channel
-	if r == signalsdk.RoleOfferer {
+	if r == signalsdk.RoleClient {
 		ch, err = p.Dial(ctx, sig)
 		if err != nil {
 			logger.Error("Dial", "err", err)
@@ -149,9 +149,9 @@ func runBridge(_ *cobra.Command, _ []string) error {
 func parseRole(s string) (signalsdk.Role, error) {
 	switch s {
 	case "offerer":
-		return signalsdk.RoleOfferer, nil
+		return signalsdk.RoleClient, nil
 	case "answerer":
-		return signalsdk.RoleAnswerer, nil
+		return signalsdk.RoleServer, nil
 	default:
 		return 0, fmt.Errorf("unknown role %q (want offerer|answerer)", s)
 	}

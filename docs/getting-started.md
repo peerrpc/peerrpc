@@ -90,7 +90,7 @@ func main() {
     sig, _ := backend.Exchange(ctx, "my-room", "server")
 
     // 2. Start PeerConnection as Answerer
-    p, _ := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+    p, _ := peer.New(ctx, signal.RoleServer, peer.Config{})
     ch, _ := p.Accept(ctx, sig)
 
     // 3. Register RPC handler

@@ -38,9 +38,10 @@ type Claims struct {
 	ExpiresAt int64 `json:"exp"`
 	// IssuedAt is the unix-seconds issue time.
 	IssuedAt int64 `json:"iat"`
-	// RoomID optionally scopes the token to one room. v1 does not
-	// enforce this at the auth layer; the signaling server does.
-	RoomID string `json:"room_id,omitempty"`
+	// Service optionally scopes the token to one service. The
+	// signaling server may use this to reject tokens that try to
+	// announce against an unrelated service.
+	Service string `json:"service,omitempty"`
 }
 
 // ErrInvalidToken is the sentinel returned for malformed or

@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v1"
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v1/signalingpbconnect"
+	signalingpbv2 "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2"
+	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
 	"github.com/peerrpc/signal-server/server"
 	"github.com/peerrpc/signal-server/store"
 
@@ -35,7 +35,7 @@ func TestInteropServer_ServesStaticAndSignal(t *testing.T) {
 	signalSrv := server.New(store.NewMemory(), server.Config{})
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(signalSrv)
+	path, handler := signalingpbv2connect.NewSignalingServiceHandler(signalSrv)
 	mux.Handle(path, handler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -81,7 +81,7 @@ func TestInteropServer_SignalingExchange(t *testing.T) {
 	signalSrv := server.New(store.NewMemory(), server.Config{})
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(signalSrv)
+	path, handler := signalingpbv2connect.NewSignalingServiceHandler(signalSrv)
 	mux.Handle(path, handler)
 
 	srv := httptest.NewUnstartedServer(mux)
@@ -92,16 +92,16 @@ func TestInteropServer_SignalingExchange(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := signalingpbconnect.NewSignalingServiceClient(
+	client := signalingpbv2connect.NewSignalingServiceClient(
 		srv.Client(), srv.URL, connect.WithSendGzip(),
 	)
 
 	// alice
 	aliceStream := client.Exchange(ctx)
-	if err := aliceStream.Send(&signalingpb.SignalMessage{
-		RoomId: "test-room",
-		Body: &signalingpb.SignalMessage_Join{
-			Join: &signalingpb.JoinRequest{PeerId: "alice", Role: signalingpb.JoinRequest_ROLE_OFFERER},
+	if err := aliceStream.Send(&signalingpbv2.SignalMessage{
+		Service: "test-room",
+		Body: &signalingpbv2.SignalMessage_Announce{
+			Announce: &signalingpbv2.AnnounceRequest{PeerId: "alice", Role: signalingpbv2.AnnounceRequest_ROLE_CLIENT},
 		},
 	}); err != nil {
 		t.Fatalf("alice join: %v", err)
@@ -109,20 +109,20 @@ func TestInteropServer_SignalingExchange(t *testing.T) {
 
 	// bob
 	bobStream := client.Exchange(ctx)
-	if err := bobStream.Send(&signalingpb.SignalMessage{
-		RoomId: "test-room",
-		Body: &signalingpb.SignalMessage_Join{
-			Join: &signalingpb.JoinRequest{PeerId: "bob", Role: signalingpb.JoinRequest_ROLE_ANSWERER},
+	if err := bobStream.Send(&signalingpbv2.SignalMessage{
+		Service: "test-room",
+		Body: &signalingpbv2.SignalMessage_Announce{
+			Announce: &signalingpbv2.AnnounceRequest{PeerId: "bob", Role: signalingpbv2.AnnounceRequest_ROLE_SERVER},
 		},
 	}); err != nil {
 		t.Fatalf("bob join: %v", err)
 	}
 
 	// alice sends offer; bob should receive.
-	offer := &signalingpb.SignalMessage{
-		RoomId: "test-room",
-		Body: &signalingpb.SignalMessage_Offer{
-			Offer: &signalingpb.SdpOffer{Sdp: "v=0\r\no=- interop 1"},
+	offer := &signalingpbv2.SignalMessage{
+		Service: "test-room",
+		Body: &signalingpbv2.SignalMessage_Offer{
+			Offer: &signalingpbv2.SdpOffer{Sdp: "v=0\r\no=- interop 1"},
 		},
 	}
 	if err := aliceStream.Send(offer); err != nil {

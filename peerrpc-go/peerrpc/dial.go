@@ -75,12 +75,12 @@ func dialTarget(ctx context.Context, cfg dialConfig) (*Conn, error) {
 	// server doesn't leak a phantom peer.
 	var ch *transport.Channel
 	switch resolution.PeerRole {
-	case signal.RoleOfferer:
+	case signal.RoleClient:
 		ch, err = p.Dial(ctx, resolution.Session)
 		if err != nil {
 			return cleanupDial(p, resolution.Session, fmt.Errorf("peerrpc: peer.Dial: %w", err))
 		}
-	case signal.RoleAnswerer:
+	case signal.RoleServer:
 		ch, err = p.Accept(ctx, resolution.Session)
 		if err != nil {
 			return cleanupDial(p, resolution.Session, fmt.Errorf("peerrpc: peer.Accept: %w", err))

@@ -26,23 +26,11 @@ pub use remote::Remote;
 
 // ─── Wire types ─────────────────────────────────────────────
 
-/// Per-message signaling envelope.
-///
-/// The rendezvous key is `service` (v2 wire field). `room_id` is
-/// retained as a deprecated alias and mirrors `service` so existing
-/// callers continue to compile; new code should read `service`.
+/// Per-message signaling envelope. The rendezvous key is `service`.
 #[derive(Debug, Clone)]
 pub struct SignalMessage {
     pub service: String,
     pub body: SignalBody,
-}
-
-impl SignalMessage {
-    /// Deprecated alias for `service`. Mirrors the v1 wire field
-    /// name. Removal is scheduled for two releases after v2 GA.
-    pub fn room_id(&self) -> &str {
-        &self.service
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -80,13 +68,8 @@ pub struct Session {
 }
 
 impl Session {
-    /// Rendezvous key (v2 wire field; replaces v1's room_id).
+    /// Rendezvous key.
     pub fn service(&self) -> &str {
-        &self.service
-    }
-
-    /// Deprecated alias for `service`.
-    pub fn room_id(&self) -> &str {
         &self.service
     }
 

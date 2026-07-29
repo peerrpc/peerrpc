@@ -1,8 +1,6 @@
-// Package signal provides the PeerRPC signaling client and pluggable
-// backends.
-//
-// Remote is a connect-go-based backend that connects to the standalone
-// signal-server binary.
+// Package signal remote backend: connect-go client that speaks the
+// v2 signaling wire format (service / AnnounceRequest) to a remote
+// signal-server.
 
 package signal
 
@@ -12,22 +10,23 @@ import (
 	"fmt"
 	"sync"
 
-	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v1"
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v1/signalingpbconnect"
+	signalingpbv2 "github.com/peerrpc/go/gen/proto/peerrpc/signaling/v2"
+	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
 
 	"connectrpc.com/connect"
 )
 
-// Remote is a Backend that connects to a remote signal-server via the
-// Connect protocol (gRPC/gRPC-Web/Connect). The constructor takes a
-// base URL and optional connect.ClientOption values.
+// Remote is a Backend that connects to a remote signal-server via
+// the Connect protocol (gRPC/gRPC-Web/Connect). The constructor
+// takes a base URL and optional connect.ClientOption values.
 //
 // Usage:
 //
 //	backend := signal.NewRemote("http://localhost:8080")
-//	sig, err := backend.Exchange(ctx, "room-id", "peer-id")
+//	sig, err := backend.Exchange(ctx, "service-id", "peer-id")
 //
-// Remote is safe for concurrent use by any number of peers and rooms.
+// Remote is safe for concurrent use by any number of peers and
+// services.
 type Remote struct {
 	baseURL string
 	opts    []connect.ClientOption
@@ -39,23 +38,24 @@ func NewRemote(baseURL string, extraOpts ...connect.ClientOption) *Remote {
 	return &Remote{baseURL: baseURL, opts: extraOpts}
 }
 
-// Exchange implements Backend by opening a Connect bidi stream to the
-// signal-server. The first message sent on the stream is a JoinRequest
-// carrying the peer ID. Subsequent outbound messages are forwarded
-// verbatim; inbound messages from the server are delivered via the
-// returned Session's Receive channel.
+// Exchange implements Backend by opening a Connect bidi stream to
+// the signal-server. The first message sent on the stream is an
+// AnnounceRequest carrying the peer id and role. Subsequent
+// outbound messages are forwarded verbatim; inbound messages from
+// the server are delivered via the returned Session's Receive
+// channel.
 //
 // The caller MUST close the Session when done (or cancel ctx) to
 // release the stream.
-func (r *Remote) Exchange(ctx context.Context, roomID, peerID string) (*Session, error) {
-	if roomID == "" {
-		return nil, errors.New("signal: empty room id")
+func (r *Remote) Exchange(ctx context.Context, service, peerID string) (*Session, error) {
+	if service == "" {
+		return nil, errors.New("signal: empty service")
 	}
 	if peerID == "" {
 		return nil, errors.New("signal: empty peer id")
 	}
 
-	client := signalingpbconnect.NewSignalingServiceClient(
+	client := signalingpbv2connect.NewSignalingServiceClient(
 		// Default HTTP client; callers can override via connect options.
 		nil,
 		r.baseURL,
@@ -64,21 +64,19 @@ func (r *Remote) Exchange(ctx context.Context, roomID, peerID string) (*Session,
 
 	stream := client.Exchange(ctx)
 
-	// First message MUST be a JoinRequest.
-	if err := stream.Send(&signalingpb.SignalMessage{
-		RoomId: roomID,
-		Body: &signalingpb.SignalMessage_Join{
-			Join: &signalingpb.JoinRequest{
+	// First message MUST be AnnounceRequest.
+	if err := stream.Send(&signalingpbv2.SignalMessage{
+		Service: service,
+		Body: &signalingpbv2.SignalMessage_Announce{
+			Announce: &signalingpbv2.AnnounceRequest{
 				PeerId: peerID,
-				Role:   signalingpb.JoinRequest_ROLE_UNSPECIFIED,
+				Role:   signalingpbv2.AnnounceRequest_ROLE_CLIENT,
 			},
 		},
 	}); err != nil {
-		return nil, fmt.Errorf("signal: send join: %w", err)
+		return nil, fmt.Errorf("signal: send announce: %w", err)
 	}
 
-	// Bridging channels: outbound signal messages -> protobuf stream,
-	// and protobuf stream -> inbound signal messages.
 	in := make(chan *SignalMessage, 32)
 	out := make(chan *SignalMessage, 32)
 
@@ -100,7 +98,7 @@ func (r *Remote) Exchange(ctx context.Context, roomID, peerID string) (*Session,
 				if err != nil {
 					continue
 				}
-				pb.RoomId = roomID
+				pb.Service = service
 				if err := stream.Send(pb); err != nil {
 					return
 				}
@@ -135,11 +133,11 @@ func (r *Remote) Exchange(ctx context.Context, roomID, peerID string) (*Session,
 	}()
 
 	s := &Session{
-		roomID: roomID,
-		peerID: peerID,
-		out:    out,
-		in:     in,
-		done:   make(chan struct{}),
+		service: service,
+		peerID:  peerID,
+		out:     out,
+		in:      in,
+		done:    make(chan struct{}),
 		cleanup: func() {
 			cancel()
 			_ = stream.CloseRequest()
@@ -148,41 +146,44 @@ func (r *Remote) Exchange(ctx context.Context, roomID, peerID string) (*Session,
 	return s, nil
 }
 
-// toProtoMessage converts a signal.SignalMessage to the protobuf
+// toProtoMessage converts a signal.SignalMessage to the v2 protobuf
 // wire type.
-func toProtoMessage(msg *SignalMessage) (*signalingpb.SignalMessage, error) {
-	pb := &signalingpb.SignalMessage{}
+func toProtoMessage(msg *SignalMessage) (*signalingpbv2.SignalMessage, error) {
+	pb := &signalingpbv2.SignalMessage{}
 	switch {
-	case msg.Body.Join != nil:
-		pb.Body = &signalingpb.SignalMessage_Join{
-			Join: &signalingpb.JoinRequest{
-				PeerId: msg.Body.Join.PeerID,
-				Role:   signalingpb.JoinRequest_Role(msg.Body.Join.Role),
-			},
+	case msg.Body.Announce != nil:
+		a := msg.Body.Announce
+		req := &signalingpbv2.AnnounceRequest{
+			PeerId: a.PeerID,
+			Role:   signalingpbv2.AnnounceRequest_Role(a.Role),
 		}
+		if a.PeerPubkey != nil {
+			req.PeerPubkey = a.PeerPubkey
+		}
+		pb.Body = &signalingpbv2.SignalMessage_Announce{Announce: req}
 	case msg.Body.Offer != nil:
-		pb.Body = &signalingpb.SignalMessage_Offer{
-			Offer: &signalingpb.SdpOffer{Sdp: msg.Body.Offer.Sdp},
+		pb.Body = &signalingpbv2.SignalMessage_Offer{
+			Offer: &signalingpbv2.SdpOffer{Sdp: msg.Body.Offer.Sdp},
 		}
 	case msg.Body.Answer != nil:
-		pb.Body = &signalingpb.SignalMessage_Answer{
-			Answer: &signalingpb.SdpAnswer{Sdp: msg.Body.Answer.Sdp},
+		pb.Body = &signalingpbv2.SignalMessage_Answer{
+			Answer: &signalingpbv2.SdpAnswer{Sdp: msg.Body.Answer.Sdp},
 		}
 	case msg.Body.Candidate != nil:
-		pb.Body = &signalingpb.SignalMessage_Candidate{
-			Candidate: &signalingpb.IceCandidate{
+		pb.Body = &signalingpbv2.SignalMessage_Candidate{
+			Candidate: &signalingpbv2.IceCandidate{
 				Candidate:     msg.Body.Candidate.Candidate,
 				SdpMid:        msg.Body.Candidate.SdpMid,
 				SdpMlineIndex: msg.Body.Candidate.SdpMLineIndex,
 			},
 		}
 	case msg.Body.Leave != nil:
-		pb.Body = &signalingpb.SignalMessage_Leave{
-			Leave: &signalingpb.LeaveRequest{Reason: msg.Body.Leave.Reason},
+		pb.Body = &signalingpbv2.SignalMessage_Leave{
+			Leave: &signalingpbv2.LeaveRequest{Reason: msg.Body.Leave.Reason},
 		}
 	case msg.Body.Ping != nil:
-		pb.Body = &signalingpb.SignalMessage_Ping{
-			Ping: &signalingpb.Ping{TimestampMs: msg.Body.Ping.TimestampMs},
+		pb.Body = &signalingpbv2.SignalMessage_Ping{
+			Ping: &signalingpbv2.Ping{TimestampMs: msg.Body.Ping.TimestampMs},
 		}
 	default:
 		return nil, errors.New("signal: unknown body type")
@@ -190,29 +191,32 @@ func toProtoMessage(msg *SignalMessage) (*signalingpb.SignalMessage, error) {
 	return pb, nil
 }
 
-// fromProtoMessage converts a protobuf SignalMessage to the
+// fromProtoMessage converts a v2 protobuf SignalMessage to the
 // signal.SignalMessage type. Returns nil for unrecognised bodies.
-func fromProtoMessage(pb *signalingpb.SignalMessage) *SignalMessage {
-	sm := &SignalMessage{RoomID: pb.GetRoomId()}
+func fromProtoMessage(pb *signalingpbv2.SignalMessage) *SignalMessage {
+	sm := &SignalMessage{Service: pb.GetService()}
 	switch body := pb.GetBody().(type) {
-	case *signalingpb.SignalMessage_Join:
-		sm.Body.Join = &JoinRequest{
-			PeerID: body.Join.GetPeerId(),
-			Role:   Role(body.Join.GetRole()),
+	case *signalingpbv2.SignalMessage_Announce:
+		sm.Body.Announce = &AnnounceRequest{
+			PeerID: body.Announce.GetPeerId(),
+			Role:   Role(body.Announce.GetRole()),
 		}
-	case *signalingpb.SignalMessage_Offer:
+		if body.Announce.GetPeerPubkey() != nil {
+			sm.Body.Announce.PeerPubkey = body.Announce.GetPeerPubkey()
+		}
+	case *signalingpbv2.SignalMessage_Offer:
 		sm.Body.Offer = &SdpOffer{Sdp: body.Offer.GetSdp()}
-	case *signalingpb.SignalMessage_Answer:
+	case *signalingpbv2.SignalMessage_Answer:
 		sm.Body.Answer = &SdpAnswer{Sdp: body.Answer.GetSdp()}
-	case *signalingpb.SignalMessage_Candidate:
+	case *signalingpbv2.SignalMessage_Candidate:
 		sm.Body.Candidate = &IceCandidate{
 			Candidate:     body.Candidate.GetCandidate(),
 			SdpMid:        body.Candidate.GetSdpMid(),
 			SdpMLineIndex: body.Candidate.GetSdpMlineIndex(),
 		}
-	case *signalingpb.SignalMessage_Leave:
+	case *signalingpbv2.SignalMessage_Leave:
 		sm.Body.Leave = &LeaveRequest{Reason: body.Leave.GetReason()}
-	case *signalingpb.SignalMessage_Ping:
+	case *signalingpbv2.SignalMessage_Ping:
 		sm.Body.Ping = &Ping{TimestampMs: body.Ping.GetTimestampMs()}
 	default:
 		return nil

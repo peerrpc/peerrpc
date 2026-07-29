@@ -143,7 +143,7 @@ func main() {
 	)
 
 	var ch *transport.Channel
-	if r == signalsdk.RoleOfferer {
+	if r == signalsdk.RoleClient {
 		ch, err = p.Dial(ctx, sig)
 		if err != nil {
 			logger.Error("Dial", "err", err)
@@ -162,9 +162,9 @@ func main() {
 func parseRole(s string) (signalsdk.Role, error) {
 	switch s {
 	case "offerer":
-		return signalsdk.RoleOfferer, nil
+		return signalsdk.RoleClient, nil
 	case "answerer":
-		return signalsdk.RoleAnswerer, nil
+		return signalsdk.RoleServer, nil
 	default:
 		return 0, fmt.Errorf("unknown role %q (want offerer|answerer)", s)
 	}

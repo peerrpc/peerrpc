@@ -13,7 +13,7 @@ func TestHS256Verifier_RoundTrip(t *testing.T) {
 	secret := []byte("test-secret")
 	claims := auth.Claims{
 		Subject:   "alice",
-		RoomID:    "r1",
+		Service:   "svc-1",
 		IssuedAt:  time.Now().Unix(),
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	}
@@ -27,7 +27,7 @@ func TestHS256Verifier_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if got.Subject != "alice" || got.RoomID != "r1" {
+	if got.Subject != "alice" || got.Service != "svc-1" {
 		t.Fatalf("claims: %+v", got)
 	}
 }

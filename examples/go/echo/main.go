@@ -85,10 +85,10 @@ func main() {
 	must(log, "answerer signaling", err)
 	defer aSig.Close()
 
-	oPeer, err := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	oPeer, err := peer.New(ctx, signal.RoleClient, peer.Config{})
 	must(log, "offerer New", err)
 	defer oPeer.Close()
-	aPeer, err := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	aPeer, err := peer.New(ctx, signal.RoleServer, peer.Config{})
 	must(log, "answerer New", err)
 	defer aPeer.Close()
 

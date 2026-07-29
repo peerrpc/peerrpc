@@ -45,12 +45,12 @@ func TestPeer_STUNCascade(t *testing.T) {
 		OnICEConnectionStateChange:  hook,
 		NegotiationTimeout:          8 * time.Second,
 	}
-	oPeer, err := peer.New(ctx, signal.RoleOfferer, cfg)
+	oPeer, err := peer.New(ctx, signal.RoleClient, cfg)
 	if err != nil {
 		t.Fatalf("offerer New: %v", err)
 	}
 	defer oPeer.Close()
-	aPeer, err := peer.New(ctx, signal.RoleAnswerer, cfg)
+	aPeer, err := peer.New(ctx, signal.RoleServer, cfg)
 	if err != nil {
 		t.Fatalf("answerer New: %v", err)
 	}
@@ -114,12 +114,12 @@ func TestPeer_HandshakeAndRoundTrip(t *testing.T) {
 	}
 	defer answererSig.Close()
 
-	offerer, err := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	offerer, err := peer.New(ctx, signal.RoleClient, peer.Config{})
 	if err != nil {
 		t.Fatalf("offerer New: %v", err)
 	}
 	defer offerer.Close()
-	answerer, err := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	answerer, err := peer.New(ctx, signal.RoleServer, peer.Config{})
 	if err != nil {
 		t.Fatalf("answerer New: %v", err)
 	}

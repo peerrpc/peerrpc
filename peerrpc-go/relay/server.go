@@ -145,7 +145,7 @@ func (s *Server) Serve(ctx context.Context, roomID, relayPeerID string) error {
 // acceptOne accepts a DataChannel from a peer in the room and binds
 // it to the next free slot in the session.
 func (s *Server) acceptOne(ctx context.Context, roomID string, sig *signal.Session) error {
-	p, err := peer.New(ctx, signal.RoleAnswerer, s.peerCfg)
+	p, err := peer.New(ctx, signal.RoleServer, s.peerCfg)
 	if err != nil {
 		return fmt.Errorf("peer.New: %w", err)
 	}

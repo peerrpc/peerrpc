@@ -60,8 +60,8 @@ func spinUp(t *testing.T, srv *rpc.Server) (*rpc.Client, func()) {
 	oSig, _ := backend.Exchange(ctx, "room", "offerer")
 	aSig, _ := backend.Exchange(ctx, "room", "answerer")
 
-	oPeer, _ := peer.New(ctx, signal.RoleOfferer, peer.Config{})
-	aPeer, _ := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	oPeer, _ := peer.New(ctx, signal.RoleClient, peer.Config{})
+	aPeer, _ := peer.New(ctx, signal.RoleServer, peer.Config{})
 
 	go func() {
 		ch, err := aPeer.Accept(ctx, aSig)

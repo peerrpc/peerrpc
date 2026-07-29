@@ -16,7 +16,7 @@ import type { SignalMessage } from "@peerrpc/peer";
 import { SignalMessage as WireSignalMessageV2 } from "@peerrpc/protocol/gen/peerrpc/signaling/v2/signaling_pb.js";
 import type { AnnounceRequest_Role } from "@peerrpc/protocol/gen/peerrpc/signaling/v2/signaling_pb.js";
 
-export interface WebSocketSignalV2Config {
+export interface WebSocketSignalConfig {
   /** WebSocket URL (e.g. "wss://signal.example.com/ws-v2"). */
   url: string;
   /** Rendezvous key. */
@@ -29,12 +29,12 @@ export interface WebSocketSignalV2Config {
   peerPubkey?: Uint8Array;
 }
 
-export class WebSocketSignalV2 {
-  private cfg: WebSocketSignalV2Config;
+export class WebSocketSignal {
+  private cfg: WebSocketSignalConfig;
   private onMessageCb: ((msg: SignalMessage) => void) | null = null;
   private ws: WebSocket | null = null;
 
-  constructor(cfg: WebSocketSignalV2Config) {
+  constructor(cfg: WebSocketSignalConfig) {
     this.cfg = cfg;
   }
 

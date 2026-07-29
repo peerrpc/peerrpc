@@ -1,13 +1,25 @@
+/**
+ * Connect-RPC signal client: speaks the v2 signaling wire format
+ * (service / AnnounceRequest) to a remote signal-server over HTTP/2.
+ */
+
 import type { SignalMessage } from "@peerrpc/peer";
-import { SignalMessage as WireSignalMessage } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_pb.js";
-import { SignalingService } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_connect.js";
-import type { JoinRequest_Role } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_connect.js";
+import { SignalMessage as WireSignalMessageV2 } from "@peerrpc/protocol/gen/peerrpc/signaling/v2/signaling_pb.js";
+import { SignalingService } from "@peerrpc/protocol/gen/peerrpc/signaling/v2/signaling_connect.js";
+import type { AnnounceRequest_Role } from "@peerrpc/protocol/gen/peerrpc/signaling/v2/signaling_pb.js";
 
 export interface ConnectSignalConfig {
+  /** Signal-server base URL (e.g. "https://signal.example.com"). */
   url: string;
-  roomId: string;
+  /** Rendezvous key. */
+  service: string;
+  /** Caller-chosen identifier within the service. */
   peerId: string;
-  role?: JoinRequest_Role;
+  /** Application-level role. Defaults to ROLE_CLIENT. */
+  role?: AnnounceRequest_Role;
+  /** Optional Ed25519 public key. v2 servers accept but do not verify. */
+  peerPubkey?: Uint8Array;
+  /** Bearer token injected as Authorization: Bearer <token>. */
   token?: string;
 }
 
@@ -54,49 +66,36 @@ class AsyncQueue<T> {
   }
 }
 
-export { WebSocketSignal } from "./ws-signal.js";
-export type { WebSocketSignalConfig } from "./ws-signal.js";
-
-// v2 (service / AnnounceRequest) — preferred for new code.
-export { ConnectSignalV2, type ConnectSignalV2Config } from "./v2.js";
-export { WebSocketSignalV2, type WebSocketSignalV2Config } from "./ws_v2.js";
-
-// v1 (roomId / JoinRequest) — retained as deprecated aliases until
-// the v2 GA + 2-release migration window closes (see Q1). Callers
-// should migrate to ConnectSignalV2 / WebSocketSignalV2.
-export { ConnectSignal as ConnectSignalV1 } from "./v1.js";
-export type { ConnectSignalConfig as ConnectSignalV1Config } from "./v1.js";
-
 export class ConnectSignal {
   private cfg: ConnectSignalConfig;
   private onMessageCb: ((msg: SignalMessage) => void) | null = null;
-  private input: AsyncQueue<WireSignalMessage> | null = null;
+  private input: AsyncQueue<WireSignalMessageV2> | null = null;
 
   constructor(cfg: ConnectSignalConfig) {
     this.cfg = cfg;
   }
 
   async connect(): Promise<void> {
-    const { createConnectTransport } = await import(
-      "@connectrpc/connect-web"
-    );
+    const { createConnectTransport } = await import("@connectrpc/connect-web");
     const { createClient } = await import("@connectrpc/connect");
 
     const transport = createConnectTransport({
       baseUrl: this.cfg.url,
-      ...(this.cfg.token
-        ? { interceptors: [authInterceptor(this.cfg.token)] }
-        : {}),
+      ...(this.cfg.token ? { interceptors: [authInterceptor(this.cfg.token)] } : {}),
     });
     const client = createClient(SignalingService, transport);
 
     this.input = new AsyncQueue();
 
-    this.input.push(new WireSignalMessage({
-      roomId: this.cfg.roomId,
+    this.input.push(new WireSignalMessageV2({
+      service: this.cfg.service,
       body: {
-        case: "join",
-        value: { peerId: this.cfg.peerId, role: this.cfg.role ?? 0 },
+        case: "announce",
+        value: {
+          peerId: this.cfg.peerId,
+          role: this.cfg.role ?? 1 /* ROLE_CLIENT */,
+          ...(this.cfg.peerPubkey ? { peerPubkey: this.cfg.peerPubkey } : {}),
+        },
       },
     }));
 
@@ -113,7 +112,7 @@ export class ConnectSignal {
       throw new Error("signal: not connected; call connect() first");
     }
     const wire = translateOutgoing(msg);
-    wire.roomId = this.cfg.roomId;
+    wire.service = this.cfg.service;
     this.input.push(wire);
   }
 
@@ -124,7 +123,7 @@ export class ConnectSignal {
     }
   }
 
-  private async startPump(output: AsyncIterable<WireSignalMessage>): Promise<void> {
+  private async startPump(output: AsyncIterable<WireSignalMessageV2>): Promise<void> {
     try {
       for await (const msg of output) {
         const translated = translateIncoming(msg);
@@ -138,8 +137,8 @@ export class ConnectSignal {
   }
 }
 
-function translateOutgoing(msg: SignalMessage): WireSignalMessage {
-  const wire = new WireSignalMessage();
+function translateOutgoing(msg: SignalMessage): WireSignalMessageV2 {
+  const wire = new WireSignalMessageV2();
   switch (msg.type) {
     case "offer":
       wire.body = { case: "offer", value: { sdp: msg.sdp ?? "" } };
@@ -153,7 +152,7 @@ function translateOutgoing(msg: SignalMessage): WireSignalMessage {
         value: {
           candidate: msg.candidate ?? "",
           sdpMid: msg.sdpMid ?? "",
-          sdpMLineIndex: msg.sdpMLineIndex ?? 0,
+          sdpMlineIndex: msg.sdpMLineIndex ?? 0,
         },
       };
       break;
@@ -161,7 +160,7 @@ function translateOutgoing(msg: SignalMessage): WireSignalMessage {
   return wire;
 }
 
-function translateIncoming(wire: WireSignalMessage): SignalMessage | null {
+function translateIncoming(wire: WireSignalMessageV2): SignalMessage | null {
   switch (wire.body.case) {
     case "offer":
       return { type: "offer", sdp: wire.body.value.sdp };
@@ -172,7 +171,7 @@ function translateIncoming(wire: WireSignalMessage): SignalMessage | null {
         type: "candidate",
         candidate: wire.body.value.candidate,
         sdpMid: wire.body.value.sdpMid,
-        sdpMLineIndex: wire.body.value.sdpMLineIndex,
+        sdpMLineIndex: wire.body.value.sdpMlineIndex,
       };
     default:
       return null;

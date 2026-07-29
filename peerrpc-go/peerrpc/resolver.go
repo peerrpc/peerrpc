@@ -39,8 +39,8 @@ type Resolution struct {
 	Session *signal.Session
 
 	// PeerRole is the WebRTC role the caller should pass to peer.New.
-	// Derived from Target.Role: RoleHintClient → RoleOfferer,
-	// RoleHintServer → RoleAnswerer.
+	// Derived from Target.Role: RoleHintClient → RoleClient,
+	// RoleHintServer → RoleServer.
 	PeerRole signal.Role
 
 	// PeerID is the peer_id actually used on the wire. Useful for
@@ -111,9 +111,9 @@ func peerRole(t Target, defaultIfEmpty RoleHint) signal.Role {
 		r = defaultIfEmpty
 	}
 	if r == RoleHintServer {
-		return signal.RoleAnswerer
+		return signal.RoleServer
 	}
-	return signal.RoleOfferer
+	return signal.RoleClient
 }
 
 func init() {

@@ -14,7 +14,6 @@ fn main() {
 
     let protos = [
         proto_root.join("peerrpc/peerrpc.proto"),
-        proto_root.join("peerrpc/signaling/v1/signaling.proto"),
         proto_root.join("peerrpc/signaling/v2/signaling.proto"),
         proto_root.join("google/rpc/status.proto"),
         proto_root.join("google/protobuf/any.proto"),

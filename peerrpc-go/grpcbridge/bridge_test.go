@@ -51,9 +51,9 @@ func TestBridge_BridgeIntoConnectHandler(t *testing.T) {
 	aSig, _ := backend.Exchange(ctx, "room", "answerer")
 	defer aSig.Close()
 
-	oPeer, _ := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	oPeer, _ := peer.New(ctx, signal.RoleClient, peer.Config{})
 	defer oPeer.Close()
-	aPeer, _ := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	aPeer, _ := peer.New(ctx, signal.RoleServer, peer.Config{})
 	defer aPeer.Close()
 
 	go func() {

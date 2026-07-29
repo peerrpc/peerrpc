@@ -162,8 +162,8 @@ func (p *Peer) ICEState() webrtc.ICEConnectionState {
 //  4. Exchange the offer/answer over the signaling backend.
 //  5. Wait for the DataChannel to open.
 func (p *Peer) Dial(ctx context.Context, sig *signal.Session) (*transport.Channel, error) {
-	if p.role != signal.RoleOfferer {
-		return nil, errors.New("peer: Dial requires RoleOfferer")
+	if p.role != signal.RoleClient {
+		return nil, errors.New("peer: Dial requires RoleClient")
 	}
 
 	dc, err := p.pc.CreateDataChannel(p.cfg.DataChannelLabel, &webrtc.DataChannelInit{
@@ -213,8 +213,8 @@ func (p *Peer) Dial(ctx context.Context, sig *signal.Session) (*transport.Channe
 //  3. Create+send an answer (after ICE gathering completes).
 //  4. Wait for the Offerer to open the DataChannel.
 func (p *Peer) Accept(ctx context.Context, sig *signal.Session) (*transport.Channel, error) {
-	if p.role != signal.RoleAnswerer {
-		return nil, errors.New("peer: Accept requires RoleAnswerer")
+	if p.role != signal.RoleServer {
+		return nil, errors.New("peer: Accept requires RoleServer")
 	}
 
 	offer, err := waitForOffer(ctx, sig)

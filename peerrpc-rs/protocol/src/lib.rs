@@ -22,13 +22,8 @@ pub mod google {
 pub mod gen {
     // The main peerrpc package.
     include!(concat!(env!("OUT_DIR"), "/peerrpc.rs"));
-    // The signaling packages. v1 is retained for the migration
-    // window (2 releases after v2 GA per Q1); v2 is the preferred
-    // wire format going forward.
+    // The signaling package.
     pub mod signaling {
-        pub mod v1 {
-            include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.v1.rs"));
-        }
         pub mod v2 {
             include!(concat!(env!("OUT_DIR"), "/peerrpc.signaling.v2.rs"));
         }
@@ -43,8 +38,8 @@ pub use prost_types;
 pub use gen::{
     Begin, Call, Chunk, Data, End, Frame, Metadata, ResponseFrame, Routing, Strings,
 };
-pub use gen::signaling::v1::{
-    IceCandidate, JoinRequest, SdpAnswer, SdpOffer, SignalMessage,
+pub use gen::signaling::v2::{
+    AnnounceRequest, IceCandidate, SdpAnswer, SdpOffer, SignalMessage,
 };
 pub use google::rpc::Status;
 

@@ -10,14 +10,7 @@ import (
 //
 // PeerRPC supports one Server serving multiple Clients in the same
 // service. The cap prevents pathological fan-out.
-//
-// MaxPeersPerRoom is retained as a deprecated alias; new code should
-// use MaxPeersPerService.
 const MaxPeersPerService = 10
-
-// Deprecated: use MaxPeersPerService. Removal scheduled for the
-// second release after v2 GA.
-const MaxPeersPerRoom = MaxPeersPerService
 
 // Memory is an in-process Store. It is the default for the
 // standalone signal-server binary and the only backend v1 ships.
@@ -44,8 +37,8 @@ type memoryPeer struct {
 	id      string
 	service string
 	inbox   chan SignalMessage
-	// inboxClosed avoids double-close panics when Leave races
-	// with the service's own teardown.
+	// inboxClosed avoids double-close panics when Leave races with
+	// the service's own teardown.
 	inboxClosed bool
 	closeMu     sync.Mutex
 }
@@ -154,9 +147,6 @@ func (m *Memory) Stats() Stats {
 		out.ServicePeers[id] = n
 		out.Peers += n
 	}
-	// Backfill deprecated aliases.
-	out.Rooms = out.Services
-	out.RoomPeers = out.ServicePeers
 	return out
 }
 
@@ -182,7 +172,7 @@ func (s *memorySender) Send(ctx context.Context, msg SignalMessage) error {
 		select {
 		case mp.inbox <- msg:
 		default:
-			// Inbox overflow: best-effort for v1.
+			// Inbox overflow: best-effort.
 		}
 	}
 	return nil

@@ -3,12 +3,9 @@
 //
 // Two peers wishing to exchange WebRTC SDP announce against the same
 // service; the store tracks who is in which service and routes
-// messages between them. The interface is small so that backends can
-// be swapped (in-memory for tests / single binary, Redis for
+// messages between them. The interface is small so that backends
+// can be swapped (in-memory for tests / single binary, Redis for
 // production horizontal scaling) without touching the handler.
-//
-// The store is wire-version agnostic. v1 handlers map room_id to
-// Service at the boundary; v2 handlers pass service through directly.
 package store
 
 import (
@@ -25,8 +22,6 @@ import (
 // as opaque.
 type SignalMessage struct {
 	// Service is the rendezvous key the message is addressed to.
-	// v1 handlers fill this from the wire's room_id; v2 handlers
-	// fill it from the wire's service field.
 	Service string
 	// SenderID is the peer that produced the message. The store
 	// fills this in from the session and never trusts the wire.
@@ -50,15 +45,8 @@ type Peer struct {
 var ErrPeerAlreadyExists = errors.New("store: peer already exists in service")
 
 // ErrServiceFull is returned by Join when the service has reached
-// MaxPeers. Two peers per service is the PeerRPC v1 ceiling.
-//
-// ErrRoomFull is retained as a deprecated alias for callers that
-// have not yet been updated; new code should use ErrServiceFull.
+// MaxPeers. Two peers per service is the PeerRPC ceiling.
 var ErrServiceFull = errors.New("store: service is full")
-
-// Deprecated: use ErrServiceFull. Kept until handlers and tests are
-// migrated; removal is scheduled for the second release after v2 GA.
-var ErrRoomFull = ErrServiceFull
 
 // Store is the rendezvous backend for the signaling server.
 //
@@ -81,8 +69,7 @@ type Store interface {
 	// associated receiver channel. Safe to call multiple times.
 	Leave(ctx context.Context, peer Peer) error
 
-	// Stats returns service/peer counts for diagnostics. The shape
-	// is implementation-defined; tests assert specific fields.
+	// Stats returns service/peer counts for diagnostics.
 	Stats() Stats
 }
 
@@ -90,7 +77,7 @@ type Store interface {
 type Sender interface {
 	// Send broadcasts msg to every other peer currently in the
 	// service. Send is non-blocking: if a remote peer's inbox is
-	// full, the message is dropped (signaling is best-effort for v1).
+	// full, the message is dropped (signaling is best-effort).
 	Send(ctx context.Context, msg SignalMessage) error
 	// Close releases the sender. Subsequent calls are no-ops.
 	Close() error
@@ -108,10 +95,4 @@ type Stats struct {
 	Services     int
 	Peers        int
 	ServicePeers map[string]int
-
-	// Rooms and RoomPeers are deprecated aliases retained for
-	// callers that have not yet migrated. They mirror Services /
-	// ServicePeers; new code should read the Service* fields.
-	Rooms     int
-	RoomPeers map[string]int
 }

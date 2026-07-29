@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v1/signalingpbconnect"
+	signalingpbv2connect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/v2/signalingpbv2connect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
@@ -80,7 +80,7 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
+	path, handler := signalingpbv2connect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -88,7 +88,7 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	})
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, _ *http.Request) {
 		s := mem.Stats()
-		logger.Info("stats", "rooms", s.Rooms, "peers", s.Peers)
+		logger.Info("stats", "services", s.Services, "peers", s.Peers)
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.Handle("/metrics", promhttp.Handler())
@@ -153,5 +153,5 @@ func (a jwtVerifierAdapter) Validate(_ context.Context, token string) (auth.Iden
 	if err != nil {
 		return auth.Identity{}, err
 	}
-	return auth.Identity{Subject: claims.Subject, RoomID: claims.RoomID}, nil
+	return auth.Identity{Subject: claims.Subject, Service: claims.Service}, nil
 }

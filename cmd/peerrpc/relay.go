@@ -24,7 +24,7 @@ frames between two peers that cannot reach each other directly.`,
 
 var relayFlags struct {
 	signalAddr string
-	roomID     string
+	service     string
 	peerID     string
 	bufSize    int
 }
@@ -32,10 +32,10 @@ var relayFlags struct {
 func init() {
 	f := relayCmd.Flags()
 	f.StringVar(&relayFlags.signalAddr, "signal", "", "signal server base URL")
-	f.StringVar(&relayFlags.roomID, "room", "", "room id to relay between two peers")
+	f.StringVar(&relayFlags.service, "service", "", "service id to relay between two peers")
 	f.StringVar(&relayFlags.peerID, "peer-id", "relay", "peer id for the signaling room")
 	f.IntVar(&relayFlags.bufSize, "buf", 256, "per-direction forward buffer (frames)")
-	_ = relayCmd.MarkFlagRequired("room")
+	_ = relayCmd.MarkFlagRequired("service")
 }
 
 func runRelay(_ *cobra.Command, _ []string) error {
@@ -63,10 +63,10 @@ func runRelay(_ *cobra.Command, _ []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger.Info("relay node starting", "room_id", relayFlags.roomID, "peer_id", relayFlags.peerID)
+	logger.Info("relay node starting", "service", relayFlags.service, "peer_id", relayFlags.peerID)
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.Serve(ctx, relayFlags.roomID, relayFlags.peerID) }()
+	go func() { errCh <- srv.Serve(ctx, relayFlags.service, relayFlags.peerID) }()
 
 	<-ctx.Done()
 	logger.Info("relay node shutting down")

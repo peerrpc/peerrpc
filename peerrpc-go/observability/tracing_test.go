@@ -71,8 +71,8 @@ func TestTraceClientServer_PropagatesSpanContext(t *testing.T) {
 	backend := signal.NewLocal()
 	oSig, _ := backend.Exchange(ctx, "tr", "o")
 	aSig, _ := backend.Exchange(ctx, "tr", "a")
-	oPeer, _ := peer.New(ctx, signal.RoleOfferer, peer.Config{})
-	aPeer, _ := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	oPeer, _ := peer.New(ctx, signal.RoleClient, peer.Config{})
+	aPeer, _ := peer.New(ctx, signal.RoleServer, peer.Config{})
 	defer oPeer.Close()
 	defer aPeer.Close()
 

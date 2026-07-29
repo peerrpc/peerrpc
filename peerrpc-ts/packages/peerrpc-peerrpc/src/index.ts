@@ -19,8 +19,8 @@
 import { type SignalTransport, dial as peerDial, accept as peerAccept, type PeerConfig } from "@peerrpc/peer";
 import { Client, Server, ServerStream, MethodKind, ok, err, type ServiceDesc, type Handler, type Status } from "@peerrpc/rpc";
 import type { Channel } from "@peerrpc/transport";
-import { ConnectSignalV2 } from "@peerrpc/signal";
-import { WebSocketSignalV2 } from "@peerrpc/signal";
+import { ConnectSignal } from "@peerrpc/signal";
+import { WebSocketSignal } from "@peerrpc/signal";
 import { localBus } from "./local_bus.js";
 import { parseTarget, formatTarget, type Target, type Scheme, type RoleHint, TargetParseError } from "./target.js";
 import type { DialOptions, ListenOptions } from "./options.js";
@@ -52,7 +52,7 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
     case "local":
       return localBus.join(target.service, peerId);
     case "connect": {
-      const sig = new ConnectSignalV2({
+      const sig = new ConnectSignal({
         url: target.signal.startsWith("http") ? target.signal : `https://${target.signal}`,
         service: target.service,
         peerId,
@@ -64,7 +64,7 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
       };
     }
     case "ws": {
-      const sig = new WebSocketSignalV2({
+      const sig = new WebSocketSignal({
         url: target.signal.startsWith("ws") ? target.signal : `wss://${target.signal}/ws-v2`,
         service: target.service,
         peerId,
@@ -220,7 +220,7 @@ function applyOpts(t: Target, opts: DialOptions | ListenOptions): void {
 
 async function maybeConnectSignal(transport: SignalTransport): Promise<void> {
   // The local scheme's transport is already "connected" (in-process).
-  // The network schemes (ConnectSignalV2, WebSocketSignalV2) expose
+  // The network schemes (ConnectSignal, WebSocketSignal) expose
   // connect() via duck-typing.
   const maybe = transport as unknown as { connect?: () => Promise<void> };
   if (typeof maybe.connect === "function") {

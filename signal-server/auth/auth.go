@@ -25,7 +25,7 @@ var ErrUnauthenticated = errors.New("auth: invalid or expired token")
 // decisions in v1 (every valid token is treated equivalently).
 type Identity struct {
 	Subject string
-	RoomID  string
+	Service string
 }
 
 // TokenValidator checks a bearer token and returns the Identity it

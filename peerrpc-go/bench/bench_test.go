@@ -84,12 +84,12 @@ func setup(b *testing.B) (*rpc.Client, func()) {
 		},
 	})
 
-	oPeer, err := peer.New(ctx, signal.RoleOfferer, peer.Config{})
+	oPeer, err := peer.New(ctx, signal.RoleClient, peer.Config{})
 	if err != nil {
 		cancel()
 		b.Fatalf("offerer New: %v", err)
 	}
-	aPeer, err := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+	aPeer, err := peer.New(ctx, signal.RoleServer, peer.Config{})
 	if err != nil {
 		cancel()
 		b.Fatalf("answerer New: %v", err)
@@ -349,8 +349,8 @@ func BenchmarkConnectionSetup(b *testing.B) {
 		oSig, _ := backend.Exchange(ctx, fmt.Sprintf("cs-%d", i), "o")
 		aSig, _ := backend.Exchange(ctx, fmt.Sprintf("cs-%d", i), "a")
 
-		oPeer, _ := peer.New(ctx, signal.RoleOfferer, peer.Config{})
-		aPeer, _ := peer.New(ctx, signal.RoleAnswerer, peer.Config{})
+		oPeer, _ := peer.New(ctx, signal.RoleClient, peer.Config{})
+		aPeer, _ := peer.New(ctx, signal.RoleServer, peer.Config{})
 
 		var wg sync.WaitGroup
 		wg.Add(1)
