@@ -28,6 +28,9 @@ check-go:
 build-peerrpc:
 	cd cmd/peerrpc && $(GO) build -o ../../peerrpc .
 
+build-peerrpc-interop-ts:
+	cd test/cross-lang/go-ts && $(GO) build -o ../../peerrpc-interop-ts .
+
 tidy:
 	cd peerrpc-go && $(GO) mod tidy
 	cd cmd/peerrpc && $(GO) mod tidy
