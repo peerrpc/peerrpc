@@ -30,6 +30,11 @@ type FrameQueue = {
 export interface TransportConfig {
   /** Override the high-watermark for outbound backpressure. */
   bufferedAmountHigh?: number;
+  /**
+   * Inbound decode mode: "response" (default) decodes ResponseFrame
+   * (server→client), "request" decodes Frame (client→server).
+   */
+  decodeMode?: "response" | "request";
 }
 
 /**
@@ -41,8 +46,9 @@ export interface TransportConfig {
 export class Channel {
   private dc: RTCDataChannel;
   private highWatermark: number;
+  private decodeMode: "response" | "request";
   private inboundBuf: Uint8Array = new Uint8Array(0);
-  private onFrameCb: ((frame: ResponseFrame) => void) | null = null;
+  private onFrameCb: ((frame: ResponseFrame | Frame) => void) | null = null;
   private onCloseCb: (() => void) | null = null;
   private closed = false;
 
@@ -53,6 +59,7 @@ export class Channel {
   constructor(dc: RTCDataChannel, cfg?: TransportConfig) {
     this.dc = dc;
     this.highWatermark = cfg?.bufferedAmountHigh ?? BUFFERED_AMOUNT_HIGH;
+    this.decodeMode = cfg?.decodeMode ?? "response";
     dc.binaryType = "arraybuffer";
     dc.onmessage = (ev) => this.handleMessage(ev);
     dc.onclose = () => this.handleClose();
@@ -64,8 +71,16 @@ export class Channel {
    * Install the inbound frame handler. Called exactly once for each
    * decoded ResponseFrame.
    */
-  onFrame(cb: (frame: ResponseFrame) => void): void {
+  onFrame(cb: (frame: ResponseFrame | Frame) => void): void {
     this.onFrameCb = cb;
+  }
+
+  /**
+   * Set the inbound decode mode. "response" (default) decodes
+   * ResponseFrame (client side), "request" decodes Frame (server side).
+   */
+  setDecodeMode(mode: "response" | "request"): void {
+    this.decodeMode = mode;
   }
 
   /**
@@ -80,7 +95,7 @@ export class Channel {
    * by awaiting the `bufferedamountlow` event when the SCTP buffer
    * exceeds the high-watermark.
    */
-  async send(frame: Frame): Promise<void> {
+  async send(frame: Frame | ResponseFrame): Promise<void> {
     if (this.closed) {
       throw new Error("transport: channel closed");
     }
@@ -88,7 +103,7 @@ export class Channel {
     if (this.dc.bufferedAmount >= this.highWatermark) {
       await this.awaitBufferLow();
     }
-    const encoded = encodeFrame(frame);
+    const encoded = encodeFrame(frame as Frame);
     this.dc.send(encoded);
   }
 
@@ -164,7 +179,9 @@ export class Channel {
 
     // Try to decode as many frames as the buffer holds.
     for (;;) {
-      const result = tryDecodeResponseFrame(this.inboundBuf);
+      const result = this.decodeMode === "request"
+        ? tryDecodeFrame(this.inboundBuf)
+        : tryDecodeResponseFrame(this.inboundBuf);
       if (result === null) {
         break;
       }

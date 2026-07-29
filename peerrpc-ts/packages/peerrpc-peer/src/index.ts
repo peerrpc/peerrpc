@@ -20,6 +20,8 @@ export interface SignalMessage {
   candidate?: string;
   sdpMid?: string | null;
   sdpMLineIndex?: number | null;
+  from?: string;
+  to?: string;
 }
 
 /**
@@ -57,6 +59,7 @@ export class Peer {
   private dc: RTCDataChannel | null = null;
   private channelPromise: Promise<Channel> | null = null;
   private channelResolve: ((ch: Channel) => void) | null = null;
+  private channelTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(cfg: PeerConfig = {}) {
     this.cfg = cfg;
@@ -128,10 +131,20 @@ export class Peer {
     if (this.channelPromise) {
       return this.channelPromise;
     }
+    if (this.dc && this.dc.readyState === "open") {
+      const ch = new Channel(this.dc, this.cfg.transport);
+      this.channelPromise = Promise.resolve(ch);
+      return this.channelPromise;
+    }
     const timeout = this.cfg.negotiationTimeout ?? DEFAULT_NEGOTIATION_TIMEOUT;
     this.channelPromise = new Promise<Channel>((resolve, reject) => {
       this.channelResolve = resolve;
-      setTimeout(() => {
+      this.channelTimeoutId = setTimeout(() => {
+        if (this.dc && this.dc.readyState === "open") {
+          const ch = new Channel(this.dc, this.cfg.transport);
+          resolve(ch);
+          return;
+        }
         reject(new Error(`peer: DataChannel did not open within ${timeout}ms`));
       }, timeout);
     });
@@ -172,7 +185,22 @@ export class Peer {
   }
 
   private setupDataChannel(dc: RTCDataChannel): void {
+    if (dc.readyState === "open") {
+      if (this.channelTimeoutId) {
+        clearTimeout(this.channelTimeoutId);
+        this.channelTimeoutId = null;
+      }
+      if (this.channelResolve) {
+        const ch = new Channel(dc, this.cfg.transport);
+        this.channelResolve(ch);
+      }
+      return;
+    }
     dc.onopen = () => {
+      if (this.channelTimeoutId) {
+        clearTimeout(this.channelTimeoutId);
+        this.channelTimeoutId = null;
+      }
       if (this.channelResolve) {
         const ch = new Channel(dc, this.cfg.transport);
         this.channelResolve(ch);

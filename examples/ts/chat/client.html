@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeerRPC Chat Client</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    .status { padding: 8px 12px; border-radius: 6px; margin: 12px 0; font-family: monospace; font-size: 14px; }
+    .status.idle { background: #f0f0f0; color: #666; }
+    .status.connecting { background: #fff3cd; color: #856404; }
+    .status.connected { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    button { padding: 8px 16px; margin: 4px 0; font-size: 14px; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    input { padding: 8px; font-size: 14px; width: 240px; margin-right: 8px; }
+    pre { background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; }
+    .row { margin: 8px 0; }
+    hr { margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>PeerRPC Chat Client</h1>
+  <p>TS Offerer — connects to the chat server and invokes RPCs.</p>
+
+  <div class="row">
+    <label>Room ID: <input id="room-input" value="chat-demo" /></label>
+  </div>
+  <div class="row">
+    <button id="connect-btn">Connect to Server</button>
+  </div>
+
+  <div id="status" class="status idle">Disconnected</div>
+
+  <div id="rpc-section" style="display:none">
+    <h2>Echo</h2>
+    <div class="row">
+      <input id="echo-input" value="hello from client" />
+      <button id="echo-btn">Send Echo</button>
+    </div>
+    <pre id="echo-output">No response yet</pre>
+
+    <h2>Reverse</h2>
+    <div class="row">
+      <input id="reverse-input" value="hello" />
+      <button id="reverse-btn">Reverse</button>
+    </div>
+    <pre id="reverse-output">No response yet</pre>
+
+    <h2>Server Streaming</h2>
+    <div class="row">
+      <input id="stream-input" value="ping" />
+      <button id="stream-btn">Stream</button>
+    </div>
+    <pre id="stream-output">No chunks yet</pre>
+  </div>
+
+  <script type="module" src="./src/client/main.ts"></script>
+</body>
+</html>

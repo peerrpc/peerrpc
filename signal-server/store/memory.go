@@ -8,10 +8,9 @@ import (
 
 // MaxPeersPerRoom caps how many peers may join the same room.
 //
-// PeerRPC is fundamentally two-party (one Offerer, one Answerer); a
-// higher cap would invite pathological fan-out in the broadcast loop
-// and provides no application value.
-const MaxPeersPerRoom = 2
+// PeerRPC supports one Answerer (server) serving multiple Offerers
+// (clients) in the same room. The cap prevents pathological fan-out.
+const MaxPeersPerRoom = 10
 
 // Memory is an in-process Store. It is the default for the
 // standalone signal-server binary and the only backend v1 ships.

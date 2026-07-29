@@ -1,59 +1,72 @@
-/**
- * Signal layer: connect-web client for the standalone PeerRPC
- * signal-server.
- *
- * The browser uses @connectrpc/connect-web to talk to the
- * signal-server's SignalingService.Exchange bidi stream. This module
- * wraps the stream into the SignalTransport shape the Peer layer
- * expects.
- */
-
 import type { SignalMessage } from "@peerrpc/peer";
 import { SignalMessage as WireSignalMessage } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_pb.js";
-import {
-  SignalingService,
-  type JoinRequest_Role,
-} from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_pb.js";
+import { SignalingService } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_connect.js";
+import type { JoinRequest_Role } from "@peerrpc/protocol/gen/peerrpc/signaling/v1/signaling_connect.js";
 
 export interface ConnectSignalConfig {
-  /** signal-server base URL, e.g. https://signal.example.com */
   url: string;
-  /** room id to join. */
   roomId: string;
-  /** peer id for this client. */
   peerId: string;
-  /** offerer or answerer. */
   role?: JoinRequest_Role;
-  /** bearer token for the Authorization header. */
   token?: string;
 }
 
-/**
- * ConnectSignal adapts the connect-web SignalingService.Exchange
- * bidi stream to the SignalTransport interface the Peer layer
- * consumes.
- *
- * On construction it joins the configured room; on send it pushes
- * SDP/ICE messages into the stream; onMessage delivers messages from
- * the remote peer.
- */
+class AsyncQueue<T> {
+  private items: T[] = [];
+  private resolvers: ((value: IteratorResult<T>) => void)[] = [];
+  private _closed = false;
+
+  push(item: T): void {
+    if (this._closed) throw new Error("signal: queue closed");
+    if (this.resolvers.length > 0) {
+      this.resolvers.shift()!({ value: item, done: false });
+    } else {
+      this.items.push(item);
+    }
+  }
+
+  close(): void {
+    this._closed = true;
+    for (const resolve of this.resolvers) {
+      resolve({ value: undefined as never, done: true });
+    }
+    this.resolvers = [];
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: (): Promise<IteratorResult<T>> => {
+        if (this.items.length > 0) {
+          return Promise.resolve({ value: this.items.shift()!, done: false });
+        }
+        if (this._closed) {
+          return Promise.resolve({ value: undefined as never, done: true });
+        }
+        return new Promise<IteratorResult<T>>((resolve) => {
+          this.resolvers.push(resolve);
+        });
+      },
+      return: (): Promise<IteratorResult<T>> => {
+        this.close();
+        return Promise.resolve({ value: undefined as never, done: true });
+      },
+    };
+  }
+}
+
+export { WebSocketSignal } from "./ws-signal.js";
+export type { WebSocketSignalConfig } from "./ws-signal.js";
+
 export class ConnectSignal {
   private cfg: ConnectSignalConfig;
   private onMessageCb: ((msg: SignalMessage) => void) | null = null;
+  private input: AsyncQueue<WireSignalMessage> | null = null;
 
   constructor(cfg: ConnectSignalConfig) {
     this.cfg = cfg;
   }
 
-  /**
-   * Connect to the signal-server and join the configured room.
-   * Returns when the join is acknowledged.
-   *
-   * This MUST be called before send / onMessage.
-   */
   async connect(): Promise<void> {
-    // Dynamic import to avoid pulling connect-web into packages that
-    // don't need it (e.g. server-side tests).
     const { createConnectTransport } = await import(
       "@connectrpc/connect-web"
     );
@@ -67,54 +80,43 @@ export class ConnectSignal {
     });
     const client = createClient(SignalingService, transport);
 
-    // Start the Exchange bidi stream.
-    this.stream = client.call(SignalingService.method.exchange, transport);
+    this.input = new AsyncQueue();
 
-    // Send the Join message.
-    await this.stream.send({
+    this.input.push(new WireSignalMessage({
       roomId: this.cfg.roomId,
       body: {
         case: "join",
-        value: {
-          peerId: this.cfg.peerId,
-          role: this.cfg.role ?? 0,
-        },
+        value: { peerId: this.cfg.peerId, role: this.cfg.role ?? 0 },
       },
-    });
+    }));
 
-    // Start the inbound pump.
-    this.startPump();
+    const output = client.exchange(this.input);
+    this.startPump(output);
   }
-
-  private stream: any = null;
 
   onMessage(cb: (msg: SignalMessage) => void): void {
     this.onMessageCb = cb;
   }
 
   send(msg: SignalMessage): void {
-    if (!this.stream) {
+    if (!this.input) {
       throw new Error("signal: not connected; call connect() first");
     }
     const wire = translateOutgoing(msg);
     wire.roomId = this.cfg.roomId;
-    this.stream.send(wire).catch(() => {
-      // best-effort; the stream may have closed
-    });
+    this.input.push(wire);
   }
 
   close(): void {
-    if (this.stream) {
-      this.stream.close().catch(() => {});
+    if (this.input) {
+      this.input.close();
+      this.input = null;
     }
   }
 
-  private async startPump(): Promise<void> {
-    if (!this.stream) return;
+  private async startPump(output: AsyncIterable<WireSignalMessage>): Promise<void> {
     try {
-      for (;;) {
-        const msg = await this.stream.receive();
-        if (!msg) break;
+      for await (const msg of output) {
         const translated = translateIncoming(msg);
         if (translated && this.onMessageCb) {
           this.onMessageCb(translated);

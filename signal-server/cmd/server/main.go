@@ -84,6 +84,7 @@ func main() {
 	mux := http.NewServeMux()
 	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
+	mux.HandleFunc("/ws", svc.ServeWS)
 
 	// /healthz for liveness probes; the handler does not need a store
 	// round-trip because the binary itself is alive.
