@@ -15,8 +15,10 @@ use peerrpc_protocol::{
     Call, Chunk, Data, End, Frame, Routing,
     INLINE_MAX, MESSAGE_MAX, CHUNK_SIZE,
 };
+pub mod server;
+
 use peerrpc_transport::Reassembler;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 // ─── WireTransport trait ─────────────────────────────────────
 
@@ -70,25 +72,30 @@ pub struct Client {
     seq_alloc: AtomicI32,
     streams: Arc<Mutex<HashMap<i32, StreamState>>>,
     outbound: mpsc::UnboundedSender<bytes::Bytes>,
+    shutdown: Arc<Notify>,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.shutdown.notify_waiters();
+    }
 }
 
 impl Client {
     /// Construct a new Client and spawn its internal run loop.
-    ///
-    /// The run loop lives for the lifetime of the returned Arc;
-    /// dropping all clones does NOT cancel it (the transport's
-    /// recv_frame returning None is the natural exit).
     pub fn new<T: WireTransport>(transport: T) -> Arc<Self> {
         let streams = Arc::new(Mutex::new(HashMap::new()));
         let (outbound_tx, outbound_rx) = mpsc::unbounded_channel();
+        let shutdown = Arc::new(Notify::new());
 
         let client = Arc::new(Self {
             seq_alloc: AtomicI32::new(1),
             streams: streams.clone(),
             outbound: outbound_tx,
+            shutdown: shutdown.clone(),
         });
 
-        tokio::spawn(Self::run_loop(transport, outbound_rx, streams));
+        tokio::spawn(Self::run_loop(transport, outbound_rx, streams, shutdown));
 
         client
     }
@@ -291,30 +298,28 @@ impl Client {
         mut transport: T,
         mut outbound: mpsc::UnboundedReceiver<bytes::Bytes>,
         streams: Arc<Mutex<HashMap<i32, StreamState>>>,
+        shutdown: Arc<Notify>,
     ) {
         let mut reasm = Reassembler::new();
         let mut buf = Vec::new();
 
         loop {
             tokio::select! {
-                // Drain outbound queue → transport.
                 Some(frame) = outbound.recv() => {
                     transport.send_frame(frame).await;
                 }
-                // Read inbound from transport.
                 result = transport.recv_frame() => {
                     match result {
                         None => break,
                         Some(bytes) => {
                             buf.extend_from_slice(&bytes);
-                            // Decode as many frames as the buffer holds.
                             loop {
                                 match try_decode_response_frame(&buf) {
                                     Ok(Some((resp, consumed))) => {
                                         buf.drain(..consumed);
                                         Self::dispatch(resp, &streams, &mut reasm).await;
                                     }
-                                    Ok(None) => break, // need more bytes
+                                    Ok(None) => break,
                                     Err(e) => {
                                         tracing::warn!("decode error: {e}");
                                         buf.clear();
@@ -325,6 +330,7 @@ impl Client {
                         }
                     }
                 }
+                _ = shutdown.notified() => break,
             }
         }
     }

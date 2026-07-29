@@ -1,0 +1,305 @@
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use peerrpc_protocol::{
+    encode_response_frame, try_decode_frame, gen, Begin, Chunk, Data, End, Frame, Routing,
+    CHUNK_SIZE, MESSAGE_MAX,
+};
+use peerrpc_transport::Reassembler;
+use tokio::sync::{mpsc, Mutex, Notify};
+
+use crate::{Status, WireTransport};
+
+pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodKind {
+    Unary,
+    ServerStreaming,
+    ClientStreaming,
+    BidiStreaming,
+}
+
+#[derive(Clone)]
+pub struct MethodDesc {
+    pub method: String,
+    pub kind: MethodKind,
+    pub handler: Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sync>,
+}
+
+pub struct ServiceDesc {
+    pub service_name: String,
+    pub methods: Vec<MethodDesc>,
+}
+
+pub struct Server {
+    methods: HashMap<String, MethodDesc>,
+}
+
+impl Server {
+    pub fn new() -> Self {
+        Self { methods: HashMap::new() }
+    }
+
+    pub fn register_service(&mut self, desc: ServiceDesc) {
+        for m in desc.methods {
+            let path = format!("/{}/{}", desc.service_name, m.method);
+            let desc = MethodDesc {
+                method: path.clone(),
+                kind: m.kind,
+                handler: m.handler,
+            };
+            if self.methods.contains_key(&path) {
+                panic!("rpc: duplicate method registration: {path}");
+            }
+            self.methods.insert(path, desc);
+        }
+    }
+
+    pub async fn serve<T: WireTransport>(&self, mut transport: T) {
+        let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<RespFrame>();
+        let streams: Arc<Mutex<HashMap<i32, StreamState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let mut buf = Vec::new();
+        let mut reasm = Reassembler::new();
+
+        loop {
+            tokio::select! {
+                result = transport.recv_frame() => {
+                    match result {
+                        None => break,
+                        Some(bytes) => {
+                            buf.extend_from_slice(&bytes);
+                            loop {
+                                match try_decode_frame(&buf) {
+                                    Ok(Some((frame, consumed))) => {
+                                        buf.drain(..consumed);
+                                        Self::handle_frame(frame, &self.methods, &streams, &resp_tx, &mut reasm);
+                                    }
+                                    Ok(None) => break,
+                                    Err(e) => {
+                                        tracing::warn!("server: decode error: {e}");
+                                        buf.clear();
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Some(resp) = resp_rx.recv() => {
+                    let bytes = encode_response_frame(&resp.frame);
+                    transport.send_frame(bytes).await;
+                }
+            }
+        }
+    }
+
+    fn handle_frame(
+        frame: Frame,
+        methods: &HashMap<String, MethodDesc>,
+        streams: &Arc<Mutex<HashMap<i32, StreamState>>>,
+        resp_tx: &mpsc::UnboundedSender<RespFrame>,
+        reasm: &mut Reassembler,
+    ) {
+        use gen::frame::Type as FType;
+        let seq = frame.routing.as_ref().map(|r| r.sequence).unwrap_or(0);
+
+        match frame.r#type {
+            Some(FType::Call(call)) => {
+                let method = match methods.get(&call.method) {
+                    Some(m) => m.clone(),
+                    None => {
+                        Self::end_stream_with_error(seq, resp_tx, "unimplemented method");
+                        return;
+                    }
+                };
+
+                let (inbound_tx, inbound_rx) = mpsc::channel(16);
+                let half_close = Arc::new(Notify::new());
+
+                if let Some(inline) = call.inline_data {
+                    if !inline.is_empty() {
+                        let _ = inbound_tx.try_send(inline);
+                    }
+                }
+
+                {
+                    let mut guard = streams.try_lock().unwrap();
+                    if guard.contains_key(&seq) {
+                        Self::end_stream_with_error(seq, resp_tx, "duplicate sequence");
+                        return;
+                    }
+                    guard.insert(seq, StreamState {
+                        inbound: inbound_tx,
+                        half_close: half_close.clone(),
+                    });
+                }
+
+                let handler = method.handler;
+                let stream = ServerStream {
+                    seq,
+                    method: call.method,
+                    inbound: inbound_rx,
+                    half_close,
+                    resp_tx: resp_tx.clone(),
+                    header_sent: AtomicBool::new(false),
+                };
+
+                let tx = resp_tx.clone();
+                tokio::spawn(async move {
+                    let status = handler(stream).await;
+                    let end = peerrpc_protocol::ResponseFrame {
+                        routing: Some(Routing { sequence: seq }),
+                        r#type: Some(gen::response_frame::Type::End(End {
+                            close_send: false,
+                            status: Some(peerrpc_protocol::Status {
+                                code: status.code,
+                                message: status.message,
+                                details: vec![],
+                            }),
+                            ..Default::default()
+                        })),
+                    };
+                    let _ = tx.send(RespFrame { frame: end });
+                });
+            }
+            Some(FType::Data(data)) => {
+                let payload = match data.content {
+                    Some(gen::data::Content::Message(msg)) => Some(msg),
+                    Some(gen::data::Content::Chunk(chunk)) => {
+                        reasm.reassemble(seq, chunk.total_size as usize, chunk.offset as usize, &chunk.data)
+                    }
+                    None => None,
+                };
+                if let Some(payload) = payload {
+                    let guard = streams.try_lock().unwrap();
+                    if let Some(state) = guard.get(&seq) {
+                        let _ = state.inbound.try_send(payload);
+                    }
+                }
+            }
+            Some(FType::End(end)) => {
+                if end.close_send {
+                    let guard = streams.try_lock().unwrap();
+                    if let Some(state) = guard.get(&seq) {
+                        state.half_close.notify_waiters();
+                    }
+                } else {
+                    let _ = streams.try_lock().unwrap().remove(&seq);
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn end_stream_with_error(
+        seq: i32,
+        resp_tx: &mpsc::UnboundedSender<RespFrame>,
+        msg: &str,
+    ) {
+        let _ = resp_tx.send(RespFrame {
+            frame: peerrpc_protocol::ResponseFrame {
+                routing: Some(Routing { sequence: seq }),
+                r#type: Some(gen::response_frame::Type::End(End {
+                    status: Some(peerrpc_protocol::Status {
+                        code: 12,
+                        message: msg.to_string(),
+                        details: vec![],
+                    }),
+                    ..Default::default()
+                })),
+            },
+        });
+    }
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct StreamState {
+    inbound: mpsc::Sender<Vec<u8>>,
+    half_close: Arc<Notify>,
+}
+
+pub struct ServerStream {
+    seq: i32,
+    method: String,
+    inbound: mpsc::Receiver<Vec<u8>>,
+    half_close: Arc<Notify>,
+    resp_tx: mpsc::UnboundedSender<RespFrame>,
+    header_sent: AtomicBool,
+}
+
+impl ServerStream {
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    pub async fn recv(&mut self) -> Option<Vec<u8>> {
+        tokio::select! {
+            data = self.inbound.recv() => data,
+            _ = self.half_close.notified() => None,
+        }
+    }
+
+    pub async fn send(&self, data: Vec<u8>) -> Result<(), String> {
+        self.emit_begin()?;
+        if data.len() <= MESSAGE_MAX {
+            let frame = peerrpc_protocol::ResponseFrame {
+                routing: Some(Routing { sequence: self.seq }),
+                r#type: Some(gen::response_frame::Type::Data(Data {
+                    content: Some(gen::data::Content::Message(data)),
+                })),
+            };
+            self.resp_tx
+                .send(RespFrame { frame })
+                .map_err(|_| "transport closed".to_string())
+        } else {
+            let total = data.len();
+            for offset in (0..total).step_by(CHUNK_SIZE) {
+                let end = (offset + CHUNK_SIZE).min(total);
+                let frame = peerrpc_protocol::ResponseFrame {
+                    routing: Some(Routing { sequence: self.seq }),
+                    r#type: Some(gen::response_frame::Type::Data(Data {
+                        content: Some(gen::data::Content::Chunk(Chunk {
+                            total_size: total as i32,
+                            offset: offset as i32,
+                            data: data[offset..end].to_vec(),
+                        })),
+                    })),
+                };
+                self.resp_tx
+                    .send(RespFrame { frame })
+                    .map_err(|_| "transport closed".to_string())?;
+            }
+            Ok(())
+        }
+    }
+
+    fn emit_begin(&self) -> Result<(), String> {
+        if !self.header_sent.swap(true, Ordering::SeqCst) {
+            let frame = peerrpc_protocol::ResponseFrame {
+                routing: Some(Routing { sequence: self.seq }),
+                r#type: Some(gen::response_frame::Type::Begin(Begin {
+                    header: None,
+                    inline_data: None,
+                })),
+            };
+            self.resp_tx
+                .send(RespFrame { frame })
+                .map_err(|_| "transport closed".to_string())?;
+        }
+        Ok(())
+    }
+}
+
+struct RespFrame {
+    frame: peerrpc_protocol::ResponseFrame,
+}
