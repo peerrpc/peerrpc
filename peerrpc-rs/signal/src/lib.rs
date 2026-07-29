@@ -11,12 +11,38 @@ pub enum SignalError {
     Closed,
 }
 
+/// Remote backend (tonic over HTTP/2 to a remote signal-server).
+///
+/// Behind the `remote` feature (default-on) so that callers without
+/// a remote signal-server (e.g. in-process tests) can opt out and
+/// drop the tonic dependency.
+#[cfg(feature = "remote")]
+#[cfg_attr(docsrs, doc(cfg(feature = "remote")))]
+pub mod remote;
+
+#[cfg(feature = "remote")]
+#[doc(inline)]
+pub use remote::Remote;
+
 // ─── Wire types ─────────────────────────────────────────────
 
+/// Per-message signaling envelope.
+///
+/// The rendezvous key is `service` (v2 wire field). `room_id` is
+/// retained as a deprecated alias and mirrors `service` so existing
+/// callers continue to compile; new code should read `service`.
 #[derive(Debug, Clone)]
 pub struct SignalMessage {
-    pub room_id: String,
+    pub service: String,
     pub body: SignalBody,
+}
+
+impl SignalMessage {
+    /// Deprecated alias for `service`. Mirrors the v1 wire field
+    /// name. Removal is scheduled for two releases after v2 GA.
+    pub fn room_id(&self) -> &str {
+        &self.service
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -25,7 +51,6 @@ pub struct SignalBody {
     pub answer: Option<SdpAnswer>,
     pub candidate: Option<IceCandidate>,
 }
-
 #[derive(Debug, Clone)]
 pub struct SdpOffer {
     pub sdp: String,
@@ -46,7 +71,7 @@ pub struct IceCandidate {
 // ─── Session ─────────────────────────────────────────────────
 
 pub struct Session {
-    room_id: String,
+    service: String,
     peer_id: String,
     outbound: mpsc::UnboundedSender<SignalMessage>,
     inbound: mpsc::UnboundedReceiver<SignalMessage>,
@@ -55,8 +80,14 @@ pub struct Session {
 }
 
 impl Session {
+    /// Rendezvous key (v2 wire field; replaces v1's room_id).
+    pub fn service(&self) -> &str {
+        &self.service
+    }
+
+    /// Deprecated alias for `service`.
     pub fn room_id(&self) -> &str {
-        &self.room_id
+        &self.service
     }
 
     pub fn peer_id(&self) -> &str {
@@ -67,6 +98,13 @@ impl Session {
         self.outbound
             .send(msg)
             .map_err(|_| SignalError::Closed)
+    }
+
+    /// Returns a clonable sender so peer code can pump outbound
+    /// messages from async callbacks (e.g. on_ice_candidate) without
+    /// taking ownership of the Session.
+    pub fn outbound_handle(&self) -> mpsc::UnboundedSender<SignalMessage> {
+        self.outbound.clone()
     }
 
     pub async fn recv(&mut self) -> Option<SignalMessage> {
@@ -104,11 +142,11 @@ impl Local {
 
     pub async fn exchange(
         &self,
-        room_id: &str,
+        service: &str,
         peer_id: &str,
     ) -> Result<Session, SignalError> {
-        if room_id.is_empty() {
-            return Err(SignalError::Other("empty room id".into()));
+        if service.is_empty() {
+            return Err(SignalError::Other("empty service".into()));
         }
         if peer_id.is_empty() {
             return Err(SignalError::Other("empty peer id".into()));
@@ -116,12 +154,12 @@ impl Local {
 
         let mut rooms = self.rooms.lock().await;
         let room = rooms
-            .entry(room_id.to_string())
+            .entry(service.to_string())
             .or_insert_with(|| Room { peers: HashMap::new() });
 
         if room.peers.contains_key(peer_id) {
             return Err(SignalError::Other(format!(
-                "peer {peer_id:?} already in room {room_id:?}"
+                "peer {peer_id:?} already in service {service:?}"
             )));
         }
 
@@ -131,11 +169,11 @@ impl Local {
         room.peers.insert(peer_id.to_string(), inbound_tx);
 
         let rooms = self.rooms.clone();
-        let r_id = room_id.to_string();
+        let s_id = service.to_string();
         let p_id = peer_id.to_string();
         let done = Arc::new(Notify::new());
         let d = done.clone();
-        let r_id_for_task = r_id.clone();
+        let s_id_for_task = s_id.clone();
         let p_id_for_task = p_id.clone();
 
         tokio::spawn(async move {
@@ -144,7 +182,7 @@ impl Local {
                     msg = outbound_rx.recv() => {
                         match msg {
                             Some(msg) => {
-                                broadcast(&rooms, &r_id_for_task, &p_id_for_task, msg).await;
+                                broadcast(&rooms, &s_id_for_task, &p_id_for_task, msg).await;
                             }
                             None => break,
                         }
@@ -152,11 +190,11 @@ impl Local {
                     _ = d.notified() => break,
                 }
             }
-            leave(&rooms, &r_id_for_task, &p_id_for_task).await;
+            leave(&rooms, &s_id_for_task, &p_id_for_task).await;
         });
 
         let session = Session {
-            room_id: r_id,
+            service: s_id,
             peer_id: p_id,
             outbound: outbound_tx,
             inbound: inbound_rx,
@@ -176,12 +214,12 @@ impl Default for Local {
 
 async fn broadcast(
     rooms: &Arc<Mutex<HashMap<String, Room>>>,
-    room_id: &str,
+    service: &str,
     sender: &str,
     msg: SignalMessage,
 ) {
     let rooms = rooms.lock().await;
-    if let Some(room) = rooms.get(room_id) {
+    if let Some(room) = rooms.get(service) {
         for (id, tx) in &room.peers {
             if id != sender {
                 let _ = tx.send(msg.clone());
@@ -192,14 +230,14 @@ async fn broadcast(
 
 async fn leave(
     rooms: &Arc<Mutex<HashMap<String, Room>>>,
-    room_id: &str,
+    service: &str,
     peer_id: &str,
 ) {
     let mut rooms = rooms.lock().await;
-    if let Some(room) = rooms.get_mut(room_id) {
+    if let Some(room) = rooms.get_mut(service) {
         room.peers.remove(peer_id);
         if room.peers.is_empty() {
-            rooms.remove(room_id);
+            rooms.remove(service);
         }
     }
 }

@@ -186,13 +186,22 @@ impl Peer {
         let (peer, offer_sdp) = Self::create_offer(cfg).await?;
 
         sig.send(SignalMessage {
-            room_id: sig.room_id().to_string(),
+            service: sig.service().to_string(),
             body: SignalBody {
                 offer: Some(SdpOffer { sdp: offer_sdp }),
                 ..Default::default()
             },
         })?;
 
+        // Vanilla ICE: all candidates are embedded in the offer/answer
+        // SDP (create_offer / accept_offer wait for gathering complete
+        // before returning the SDP). Trickled ICE candidate forwarding
+        // is intentionally omitted here because webrtc-rs's candidate
+        // trait-object shape is awkward to plumb through on_ice_candidate
+        // without depending on internal types. v2.1 will add a proper
+        // adapter; for now localhost-only and STUN-only deployments
+        // work without trickle, and TURN-only environments degrade
+        // to longer connection setup (full gathering before signaling).
         while let Some(msg) = sig.recv().await {
             if let Some(answer) = msg.body.answer {
                 peer.set_remote_answer(answer.sdp).await?;
@@ -222,7 +231,7 @@ impl Peer {
         let (peer, answer_sdp) = Self::accept_offer(cfg, offer_sdp).await?;
 
         sig.send(SignalMessage {
-            room_id: sig.room_id().to_string(),
+            service: sig.service().to_string(),
             body: SignalBody {
                 answer: Some(SdpAnswer { sdp: answer_sdp }),
                 ..Default::default()

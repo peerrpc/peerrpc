@@ -5,7 +5,26 @@ edition.workspace = true
 license.workspace = true
 description = "PeerRPC signaling: backends for SDP/ICE exchange"
 
+[features]
+default = ["remote"]
+# Enables the tonic-based Remote backend that talks to a remote
+# signal-server over HTTP/2. Off by default would break existing
+# callers; toggle off for minimal-dep builds (e.g. wasm).
+remote = ["dep:tonic", "dep:http", "dep:tower-service", "dep:async-stream", "dep:futures-core"]
+
 [dependencies]
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
 thiserror.workspace = true
+peerrpc-protocol.workspace = true
+prost.workspace = true
+
+# Remote backend (optional; enabled by default).
+tonic = { version = "0.12", optional = true, default-features = false, features = ["codegen", "prost", "transport"] }
+http = { version = "1", optional = true }
+tower-service = { version = "0.3", optional = true }
+async-stream = { version = "0.3", optional = true }
+futures-core = { version = "0.3", optional = true }
+
+[build-dependencies]
+tonic-build = { version = "0.12", default-features = false, features = ["prost"] }

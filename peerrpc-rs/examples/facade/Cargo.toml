@@ -1,0 +1,11 @@
+[package]
+name = "peerrpc-facade-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+peerrpc.workspace = true
+peerrpc-rpc.workspace = true
+tokio = { workspace = true }

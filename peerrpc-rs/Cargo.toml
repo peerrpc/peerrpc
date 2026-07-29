@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "transport", "rpc", "peer", "signal", "examples/echo"]
+members = ["protocol", "transport", "rpc", "peer", "signal", "peerrpc", "examples/echo", "examples/facade"]
 resolver = "2"
 
 [workspace.package]
@@ -13,9 +13,11 @@ bytes = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 peerrpc-protocol = { path = "protocol" }
 peerrpc-transport = { path = "transport" }
 peerrpc-signal = { path = "signal" }
 peerrpc-rpc = { path = "rpc" }
 peerrpc-peer = { path = "peer" }
+peerrpc = { path = "peerrpc" }
