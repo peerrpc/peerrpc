@@ -64,7 +64,7 @@ export class WebSocketSignal {
         },
       },
     });
-    ws.send(encodeLengthPrefixed(announce));
+    this.ws.send(encodeLengthPrefixed(announce));
   }
 
   onMessage(cb: (msg: SignalMessage) => void): void {
@@ -130,10 +130,15 @@ function translateIncoming(wire: WireSignalMessage): SignalMessage | null {
 }
 
 // ----- length-prefixed protobuf framing (4-byte BE length) -----
+//
+// Encode/decode use the generated Message instance methods
+// (msg.toBinary() / new T().fromBinary(bytes)) rather than the
+// @bufbuild/protobuf top-level toBinary/fromBinary, which are not
+// exported in v1.x. The functions are synchronous so callers can pass
+// the result straight to ws.send without an extra await.
 
-async function encodeLengthPrefixed(msg: WireSignalMessage): Promise<ArrayBuffer> {
-  const { toBinary } = await import("@bufbuild/protobuf");
-  const body = toBinary(WireSignalMessage, msg);
+function encodeLengthPrefixed(msg: WireSignalMessage): ArrayBuffer {
+  const body = msg.toBinary();
   const out = new Uint8Array(4 + body.length);
   const dv = new DataView(out.buffer);
   dv.setUint32(0, body.length, false /* big-endian */);
@@ -141,15 +146,14 @@ async function encodeLengthPrefixed(msg: WireSignalMessage): Promise<ArrayBuffer
   return out.buffer;
 }
 
-async function decodeLengthPrefixed(buf: Uint8Array): Promise<WireSignalMessage | null> {
+function decodeLengthPrefixed(buf: Uint8Array): WireSignalMessage | null {
   if (buf.length < 4) return null;
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const len = dv.getUint32(0, false);
   if (buf.length < 4 + len) return null;
   const body = buf.subarray(4, 4 + len);
-  const { fromBinary } = await import("@bufbuild/protobuf");
   try {
-    return fromBinary(WireSignalMessage, body);
+    return new WireSignalMessage().fromBinary(body);
   } catch {
     return null;
   }
