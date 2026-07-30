@@ -22,6 +22,13 @@ export default defineConfig({
     ],
     extensions: [".ts", ".js", ".json"],
   },
+  server: {
+    fs: {
+      // The SDK sources live outside the sample directory; allow Vite
+      // to serve them so the source alias works in dev mode.
+      allow: ["..", "../..", "../../.."],
+    },
+  },
   build: {
     outDir: "dist",
   },

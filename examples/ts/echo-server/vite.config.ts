@@ -16,6 +16,11 @@ export default defineConfig({
     ],
     extensions: [".ts", ".js", ".json"],
   },
+  server: {
+    fs: {
+      allow: ["..", "../..", "../../.."],
+    },
+  },
   build: {
     outDir: "dist",
   },
