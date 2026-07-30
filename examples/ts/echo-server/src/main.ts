@@ -120,7 +120,9 @@ listenBtn.addEventListener("click", async () => {
 
   const signalUrl = signalUrlEl.value.replace(/\/$/, "");
   const service = serviceEl.value;
-  const target = `peerrpc+connect://${new URL(signalUrl).host}/${service}`;
+  // Browsers cannot do Connect bidi (fetch lacks streaming request
+  // bodies), so use the WebSocket signaling endpoint (wss://host/ws).
+  const target = `peerrpc+ws://${new URL(signalUrl).host}/${service}`;
 
   log(`listening on ${target} ...`);
   setStatus("listening...", "");

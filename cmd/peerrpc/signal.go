@@ -98,6 +98,12 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	mux := http.NewServeMux()
 	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
+
+	// WebSocket signaling endpoint for browser clients (see
+	// server.WebSocketHandler for why Connect bidi is unreachable from
+	// a browser).
+	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

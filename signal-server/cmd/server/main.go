@@ -100,6 +100,11 @@ func main() {
 	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
 	mux.Handle(path, handler)
 
+	// WebSocket signaling endpoint for browser clients. Browsers cannot
+	// do Connect bidi streaming (fetch lacks streaming request bodies),
+	// so they use wss://host/ws with the TS WebSocketSignal client.
+	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
+
 	// /healthz for liveness probes; the handler does not need a store
 	// round-trip because the binary itself is alive.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
