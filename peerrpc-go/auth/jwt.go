@@ -1,6 +1,7 @@
-// Package auth is peerrpc-go's standalone auth helpers, complementing
-// signal-server/auth with a JWT validator suitable for production
-// deployments (RFC 7519 tokens scoped to a peer_id and an expiry).
+// Package auth provides PeerRPC authentication: a JWT crypto layer
+// (HS256Verifier / Claims / IssueHS256 in jwt.go) and an HTTP/WebSocket
+// transport layer (TokenValidator / Identity / AuthorizeRequest in
+// transport.go) consumed by the signalserver package.
 //
 // The package uses HMAC-SHA256 (HS256) by default because it is the
 // cheapest verifier that does not require an external key store. RSA

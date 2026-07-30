@@ -2,7 +2,7 @@
 // the signaling wire format (service / AnnounceRequest) to a remote
 // signal-server over a raw WebSocket.
 //
-// The frame format matches signal-server/server/ws.go exactly: each
+// The frame format matches signalserver/ws.go exactly: each
 // WebSocket BinaryMessage is a 4-byte big-endian length prefix
 // followed by a marshaled peerrpc.signaling.SignalMessage protobuf.
 // The first frame the client sends MUST be an AnnounceRequest.

@@ -23,6 +23,7 @@
 //      Connect service URL. Use this when the Connect service is a
 //      pre-existing deployment the PeerRPC client wants to reach.
 //
-// v1 ships only shape 1 (in-process). Shape 2 is a thin addition
-// once we ship grpcbridge-server.
+// v1 ships both shapes: shape 1 via HTTPHandlerInvoker (in-process)
+// and shape 2 via HTTPClientInvoker (out-of-process), which the
+// `peerrpc bridge` subcommand uses to forward to a remote Connect URL.
 package grpcbridge
