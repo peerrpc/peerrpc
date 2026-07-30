@@ -124,7 +124,7 @@ func registerEcho(srv *rpc.Server) {
 }
 
 func main() {
-	signalAddr := flag.String("signal", "https://localhost:8443", "signal-server base URL (scheme required)")
+	signalAddr := flag.String("signal", "http://localhost:8443", "signal-server base URL (scheme required)")
 	service := flag.String("service", "echo.Echo", "rendezvous service key")
 	flag.Parse()
 
