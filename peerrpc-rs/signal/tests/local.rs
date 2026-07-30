@@ -5,7 +5,7 @@ use peerrpc_signal::{Local, SignalBody, SdpOffer};
 #[tokio::test]
 async fn local_exchange_by_service_and_broadcasts() {
     let local = Local::new();
-    let mut alice = local.exchange("svc.1", "alice").await.unwrap();
+    let alice = local.exchange("svc.1", "alice").await.unwrap();
     let mut bob = local.exchange("svc.1", "bob").await.unwrap();
 
     assert_eq!(alice.service(), "svc.1");

@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use peerrpc_protocol::{encode_frame, encode_response_frame, try_decode_frame, try_decode_response_frame};
 use peerrpc_rpc::server::{MethodDesc, MethodKind, Server, ServerStream, ServiceDesc};
 use peerrpc_rpc::{Client, Status, WireTransport};
 use tokio::sync::mpsc;
@@ -248,10 +247,4 @@ async fn test_bridge_client_disconnect_cleans_up() {
         .await
         .expect("server serve loop did not exit after client disconnect")
         .expect("serve task panicked");
-}
-
-// Silence unused imports if a future trim removes direct frame use.
-#[allow(dead_code)]
-fn _silence(_a: peerrpc_protocol::ResponseFrame, _b: Bytes, _c: &mut [u8]) {
-    let _ = (try_decode_frame, try_decode_response_frame, encode_response_frame);
 }
