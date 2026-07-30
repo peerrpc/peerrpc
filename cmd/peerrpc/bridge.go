@@ -35,7 +35,7 @@ remote Connect (or gRPC) service URL over HTTP.`,
 var bridgeFlags struct {
 	upstream      string
 	signalAddr    string
-	service        string
+	room          string
 	peerID        string
 	role          string
 	services      []string
@@ -46,13 +46,16 @@ func init() {
 	f := bridgeCmd.Flags()
 	f.StringVar(&bridgeFlags.upstream, "upstream", "", "Connect service base URL")
 	f.StringVar(&bridgeFlags.signalAddr, "signal", "", "signal server base URL")
-	f.StringVar(&bridgeFlags.service, "service", "", "signaling service id")
+	// Signaling room id. Named -room (not -service) to avoid colliding
+	// with the repeatable -service flag below and to match the
+	// standalone grpcbridge-server binary and docs/getting-started.md.
+	f.StringVar(&bridgeFlags.room, "room", "", "signaling room id")
 	f.StringVar(&bridgeFlags.peerID, "peer-id", "bridge", "peer id")
 	f.StringVar(&bridgeFlags.role, "role", "answerer", "peer role (offerer|answerer)")
 	f.StringArrayVar(&bridgeFlags.services, "service", nil, `unary service spec "Name:Method1,Method2"`)
 	f.StringArrayVar(&bridgeFlags.streamServices, "stream-service", nil, `server-streaming service spec "Name:Method1,Method2"`)
 	_ = bridgeCmd.MarkFlagRequired("upstream")
-	_ = bridgeCmd.MarkFlagRequired("service")
+	_ = bridgeCmd.MarkFlagRequired("room")
 }
 
 func runBridge(_ *cobra.Command, _ []string) error {
@@ -97,7 +100,7 @@ func runBridge(_ *cobra.Command, _ []string) error {
 		logger.Info("using in-process signaling")
 	}
 
-	sig, err := backend.Exchange(context.Background(), bridgeFlags.service, bridgeFlags.peerID)
+	sig, err := backend.Exchange(context.Background(), bridgeFlags.room, bridgeFlags.peerID)
 	if err != nil {
 		logger.Error("signaling exchange", "err", err)
 		return err
@@ -122,7 +125,7 @@ func runBridge(_ *cobra.Command, _ []string) error {
 
 	logger.Info("bridge starting",
 		"upstream", bridgeFlags.upstream,
-		"service", bridgeFlags.service,
+		"room", bridgeFlags.room,
 		"peer_id", bridgeFlags.peerID,
 		"role", r,
 	)
