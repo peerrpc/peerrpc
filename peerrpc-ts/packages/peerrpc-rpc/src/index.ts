@@ -14,7 +14,7 @@ import {
   INLINE_MAX,
   MESSAGE_MAX,
   CHUNK_SIZE,
-  type ResponseFrame,
+  ResponseFrame,
 } from "@peerrpc/protocol";
 import { Frame, Call, End, Data, Chunk, Routing } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
 import type { Channel } from "@peerrpc/transport";
@@ -69,7 +69,14 @@ export class Client {
 
   constructor(ch: Channel) {
     this.ch = ch;
-    ch.onFrame((frame) => this.dispatch(frame));
+    // The client only handles server->client ResponseFrames; narrow
+    // the union type from onFrame (which may also carry a Frame on the
+    // server side) so dispatch receives the type it expects.
+    ch.onFrame((frame) => {
+      if (frame instanceof ResponseFrame) {
+        this.dispatch(frame);
+      }
+    });
     ch.onClose(() => this.failAll());
   }
 

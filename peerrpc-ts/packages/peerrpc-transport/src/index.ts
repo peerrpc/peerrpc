@@ -9,6 +9,7 @@
 
 import {
   encodeFrame,
+  encodeResponseFrame,
   tryDecodeFrame,
   tryDecodeResponseFrame,
   BUFFERED_AMOUNT_HIGH,
@@ -16,7 +17,7 @@ import {
   MESSAGE_MAX,
   CHUNK_SIZE,
   type Frame,
-  type ResponseFrame,
+  ResponseFrame,
 } from "@peerrpc/protocol";
 
 /** Accumulated inbound bytes from the DataChannel; frames may arrive split. */
@@ -91,9 +92,11 @@ export class Channel {
   }
 
   /**
-   * Send a Frame (client -> server direction). Applies backpressure
-   * by awaiting the `bufferedamountlow` event when the SCTP buffer
-   * exceeds the high-watermark.
+   * Send a Frame (client -> server) or ResponseFrame (server -> client)
+   * over the DataChannel. The frame is encoded according to its actual
+   * type so a server emitting ResponseFrames is not misencoded as a
+   * Frame. Applies backpressure by awaiting the `bufferedamountlow`
+   * event when the SCTP buffer exceeds the high-watermark.
    */
   async send(frame: Frame | ResponseFrame): Promise<void> {
     if (this.closed) {
@@ -103,7 +106,12 @@ export class Channel {
     if (this.dc.bufferedAmount >= this.highWatermark) {
       await this.awaitBufferLow();
     }
-    const encoded = encodeFrame(frame as Frame);
+    // Encode by the frame's actual runtime type. The shared `Frame`
+    // import used as a base class would otherwise cause a ResponseFrame
+    // to be serialized with Frame's tag layout.
+    const encoded = frame instanceof ResponseFrame
+      ? encodeResponseFrame(frame as ResponseFrame)
+      : encodeFrame(frame as Frame);
     this.dc.send(encoded);
   }
 
