@@ -70,6 +70,10 @@ export class ConnectSignal {
   private cfg: ConnectSignalConfig;
   private onMessageCb: ((msg: SignalMessage) => void) | null = null;
   private input: AsyncQueue<WireSignalMessage> | null = null;
+  // Captured by startPump if the bidi stream errors before connect()
+  // resolves, so connect() can surface the real cause (e.g. TLS cert
+  // not accepted) instead of letting dial fail later with "queue closed".
+  private connectError: Error | null = null;
 
   constructor(cfg: ConnectSignalConfig) {
     this.cfg = cfg;
@@ -100,7 +104,26 @@ export class ConnectSignal {
     }));
 
     const output = client.exchange(this.input);
-    this.startPump(output);
+
+    // Eagerly start the pump and surface the first stream error instead
+    // of returning a healthy-looking transport that fails on the first
+    // send. connect-web defers the actual HTTP request until the first
+    // iteration, so we drive one step and capture any transport error
+    // (e.g. self-signed cert not accepted, server unreachable) before
+    // connect() resolves.
+    this.connectError = null;
+    const pumpDone = this.startPump(output);
+    // Yield once so the pump's first iteration (which issues the HTTP
+    // request) has a chance to run and, on failure, set connectError.
+    await Promise.resolve();
+    await Promise.resolve();
+    if (this.connectError) {
+      throw this.connectError;
+    }
+    // Keep the pump promise alive for diagnostics; unhandled rejection
+    // is avoided because startPump never throws (it captures into
+    // connectError instead).
+    void pumpDone.catch(() => { /* captured in connectError */ });
   }
 
   onMessage(cb: (msg: SignalMessage) => void): void {
@@ -108,6 +131,9 @@ export class ConnectSignal {
   }
 
   send(msg: SignalMessage): void {
+    if (this.connectError) {
+      throw this.connectError;
+    }
     if (!this.input) {
       throw new Error("signal: not connected; call connect() first");
     }
@@ -131,8 +157,11 @@ export class ConnectSignal {
           this.onMessageCb(translated);
         }
       }
-    } catch {
-      // stream closed
+    } catch (err) {
+      // Capture the real cause so connect() / send() can surface it.
+      // Common: self-signed cert not accepted, server unreachable.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.connectError = new Error(`signal: connect stream failed: ${msg}`);
     }
   }
 }
