@@ -38,9 +38,40 @@ export class WebSocketSignal {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
+    // Browsers do NOT surface a TLS rejection on the WebSocket error
+    // event (it carries no detail for security reasons). The close
+    // event fires with code 1006 (abnormal closure) instead. Capture
+    // it so connect() can report an actionable message pointing at the
+    // self-signed cert, rather than the opaque "ws open failed".
     await new Promise<void>((resolve, reject) => {
-      ws.addEventListener("open", () => resolve(), { once: true });
-      ws.addEventListener("error", () => reject(new Error("signal: ws open failed")), { once: true });
+      let settled = false;
+      ws.addEventListener("open", () => {
+        settled = true;
+        resolve();
+      }, { once: true });
+      ws.addEventListener("close", (ev) => {
+        if (settled) return;
+        if (ev.code === 1006) {
+          reject(new Error(
+            `signal: WebSocket to ${this.cfg.url} closed before opening (code 1006). ` +
+            `If using a self-signed cert, open ${this.cfg.url} in a tab and accept it first.`,
+          ));
+        } else {
+          reject(new Error(`signal: WebSocket closed before opening (code ${ev.code}: ${ev.reason})`));
+        }
+      }, { once: true });
+      ws.addEventListener("error", () => {
+        // Defer to the close handler, which carries the code. If error
+        // fires without a following close (some browsers), reject here.
+        setTimeout(() => {
+          if (!settled && ws.readyState === WebSocket.CLOSED) {
+            reject(new Error(
+              `signal: WebSocket to ${this.cfg.url} failed to open. ` +
+              `If using a self-signed cert, open ${this.cfg.url} in a tab and accept it first.`,
+            ));
+          }
+        }, 0);
+      }, { once: true });
     });
 
     ws.addEventListener("message", (ev) => {
