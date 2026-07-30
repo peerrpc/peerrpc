@@ -39,11 +39,13 @@ async fn main() {
     let echo = echo_handler();
     let stream = stream_handler();
 
-    // Serve clients one at a time. Each client gets its own signaling
-    // session (a fresh WebSocket + announce) which blocks in
-    // Peer::accept until a dialer sends an SDP offer. Sequential
-    // handling keeps exactly one session live at a time, so we never
-    // busy-loop or exhaust the signal-server's per-service peer cap.
+    // Serve clients one at a time for the accept handshake, then run
+    // serve() detached on its own task so a hung peer (webrtc-rs does
+    // not always surface a DataChannel close) cannot block the next
+    // client. The main loop blocks in Peer::accept until a dialer sends
+    // an SDP offer, so it never busy-loops; once a peer is accepted we
+    // hand serve() to a task and immediately re-announce for the next
+    // client.
     let mut seq: u64 = 0;
     loop {
         seq += 1;
@@ -60,33 +62,42 @@ async fn main() {
 
         let cfg = PeerConfig::default();
         // Generous timeout for browser WebRTC setup (ICE gathering on
-        // first connect can exceed the SDK's 10s default).
-        match Peer::accept(cfg, sig, Duration::from_secs(60)).await {
-            Ok(peer) => {
-                tracing::info!(%peer_id, "DataChannel open, serving echo.Echo");
-                let mut srv = Server::new();
-                srv.register_service(ServiceDesc {
-                    service_name: "echo.Echo".into(),
-                    methods: vec![
-                        MethodDesc {
-                            method: "Echo".into(),
-                            kind: MethodKind::Unary,
-                            handler: echo.clone(),
-                        },
-                        MethodDesc {
-                            method: "Stream".into(),
-                            kind: MethodKind::ServerStreaming,
-                            handler: stream.clone(),
-                        },
-                    ],
-                });
-                srv.serve(peer).await;
-                tracing::info!(%peer_id, "DataChannel closed; waiting for next client");
-            }
+        // first connect can exceed the SDK's 10s default). accept blocks
+        // here until a dialer's offer arrives, so the loop only advances
+        // when a real client connects (or the session closes).
+        let peer = match Peer::accept(cfg, sig, Duration::from_secs(60)).await {
+            Ok(p) => p,
             Err(e) => {
                 tracing::warn!(%peer_id, "Accept failed; retrying: {e}");
+                continue;
             }
-        }
+        };
+
+        tracing::info!(%peer_id, "DataChannel open, serving echo.Echo");
+        let echo_h = echo.clone();
+        let stream_h = stream.clone();
+        let pid = peer_id.clone();
+        // Detach serve(): a hung peer won't block the next accept.
+        tokio::spawn(async move {
+            let mut srv = Server::new();
+            srv.register_service(ServiceDesc {
+                service_name: "echo.Echo".into(),
+                methods: vec![
+                    MethodDesc {
+                        method: "Echo".into(),
+                        kind: MethodKind::Unary,
+                        handler: echo_h,
+                    },
+                    MethodDesc {
+                        method: "Stream".into(),
+                        kind: MethodKind::ServerStreaming,
+                        handler: stream_h,
+                    },
+                ],
+            });
+            srv.serve(peer).await;
+            tracing::info!(%pid, "DataChannel closed");
+        });
     }
 }
 
