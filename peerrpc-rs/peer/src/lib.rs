@@ -35,6 +35,14 @@ pub struct Peer {
     dc_notify: Arc<Notify>,
     open_notify: Arc<Notify>,
     inbound_rx: Mutex<mpsc::UnboundedReceiver<Bytes>>,
+    /// Outbound backpressure: notified when the DataChannel's buffered
+    /// amount drops below BUFFERED_AMOUNT_HIGH. send_frame awaits this
+    /// before writing so a burst of large frames (e.g. a 1 MiB echo
+    /// chunked into 4×255 KiB) does not overflow the SCTP send buffer
+    /// and tear down the association.
+    buffered_low: Arc<Notify>,
+    /// Closed signal for the backpressure path.
+    closed: Arc<Notify>,
 }
 
 impl Drop for Peer {
@@ -55,12 +63,15 @@ impl Peer {
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
         let open_notify = Arc::new(Notify::new());
+        let buffered_low = Arc::new(Notify::new());
+        let closed = Arc::new(Notify::new());
         let dc = pc
             .create_data_channel(peerrpc_protocol::DATACHANNEL_LABEL, None)
             .await?;
 
         setup_on_message(&dc, inbound_tx);
         setup_on_open(&dc, open_notify.clone());
+        setup_backpressure(&dc, buffered_low.clone(), closed.clone());
 
         let offer = pc.create_offer(None).await?;
         pc.set_local_description(offer).await?;
@@ -79,6 +90,8 @@ impl Peer {
             dc_notify: Arc::new(Notify::new()),
             open_notify,
             inbound_rx: Mutex::new(inbound_rx),
+            buffered_low,
+            closed,
         };
         Ok((peer, munge_max_message_size(sdp)))
     }
@@ -94,16 +107,22 @@ impl Peer {
         let dc_handle: Arc<Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(Mutex::new(None));
         let dc_notify = Arc::new(Notify::new());
         let open_notify = Arc::new(Notify::new());
+        let buffered_low = Arc::new(Notify::new());
+        let closed = Arc::new(Notify::new());
 
         let tx_cb = inbound_tx.clone();
         let dc_h = dc_handle.clone();
         let notify = dc_notify.clone();
         let on = open_notify.clone();
+        let bl = buffered_low.clone();
+        let cl = closed.clone();
         pc.on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
             let tx = tx_cb.clone();
             let h = dc_h.clone();
             let n = notify.clone();
             let open = on.clone();
+            let bl = bl.clone();
+            let cl = cl.clone();
             dc.on_message(Box::new(move |msg: DataChannelMessage| {
                 let tx = tx.clone();
                 Box::pin(async move {
@@ -116,6 +135,7 @@ impl Peer {
                     n.notify_waiters();
                 })
             }));
+            setup_backpressure(&dc, bl, cl);
             Box::pin(async move {
                 *h.lock().await = Some(dc);
                 n.notify_one();
@@ -142,6 +162,8 @@ impl Peer {
             dc_notify,
             open_notify,
             inbound_rx: Mutex::new(inbound_rx),
+            buffered_low,
+            closed,
         };
         Ok((peer, munge_max_message_size(sdp)))
     }
@@ -250,17 +272,50 @@ impl Peer {
 #[async_trait]
 impl WireTransport for Peer {
     async fn send_frame(&mut self, frame: Bytes) -> Result<(), String> {
-        if let Some(dc) = &self.dc {
-            return dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string());
-        }
-        if let Some(dc) = self.dc_handle.lock().await.as_ref() {
-            return dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string());
-        }
-        Err("peer: no data channel".into())
+        let dc = if let Some(dc) = &self.dc {
+            dc.clone()
+        } else {
+            match self.dc_handle.lock().await.clone() {
+                Some(dc) => dc,
+                None => return Err("peer: no data channel".into()),
+            }
+        };
+
+        // Apply outbound backpressure before each write: if the SCTP
+        // send buffer is above the high watermark, wait for it to drain
+        // (or for the channel to close). Without this, a burst of large
+        // frames — e.g. a 1 MiB echo chunked into 4×255 KiB — overflows
+        // the buffer and webrtc-rs tears down the association.
+        self.await_buffer_low(&dc).await?;
+
+        dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string())
     }
 
     async fn recv_frame(&mut self) -> Option<Bytes> {
         self.inbound_rx.lock().await.recv().await
+    }
+}
+
+impl Peer {
+    /// Block until the DataChannel's buffered amount is below
+    /// BUFFERED_AMOUNT_HIGH, or the channel closes. Mirrors the Go
+    /// transport's awaitBufferLow.
+    async fn await_buffer_low(&self, dc: &Arc<RTCDataChannel>) -> Result<(), String> {
+        loop {
+            if dc.buffered_amount().await < peerrpc_protocol::BUFFERED_AMOUNT_HIGH as usize {
+                return Ok(());
+            }
+            // Wait for the low-watermark notification (armed via
+            // on_buffered_amount_low in setup_backpressure).
+            tokio::select! {
+                _ = self.buffered_low.notified() => {
+                    // Re-check in the next iteration.
+                }
+                _ = self.closed.notified() => {
+                    return Err("peer: data channel closed while waiting for backpressure".into());
+                }
+            }
+        }
     }
 }
 
@@ -269,6 +324,50 @@ fn setup_on_message(dc: &Arc<RTCDataChannel>, tx: mpsc::UnboundedSender<Bytes>) 
         let tx = tx.clone();
         Box::pin(async move {
             let _ = tx.send(Bytes::copy_from_slice(&msg.data));
+        })
+    }));
+}
+
+/// Wire outbound backpressure on a DataChannel: emit the low-watermark
+/// Notify whenever the buffered amount drops below
+/// BUFFERED_AMOUNT_HIGH, and configure that threshold. Mirrors the
+/// Go transport's OnBufferedAmountLow handling so a burst of large
+/// frames does not overflow the SCTP send buffer.
+///
+/// `on_buffered_amount_low` and `on_close` are registered inline (they
+/// take sync callbacks); `set_buffered_amount_low_threshold` is async
+/// in webrtc-rs 0.17, so it runs on a spawned task (this fn is called
+/// from both async and sync-on_data_channel contexts).
+fn setup_backpressure(dc: &Arc<RTCDataChannel>, buffered_low: Arc<Notify>, closed: Arc<Notify>) {
+    // on_buffered_amount_low and set_buffered_amount_low_threshold are
+    // async in webrtc-rs 0.17, but setup_backpressure is called from a
+    // sync on_data_channel callback, so register them on spawned tasks.
+    let bl = buffered_low.clone();
+    let dc_clone = dc.clone();
+    tokio::spawn(async move {
+        dc_clone
+            .on_buffered_amount_low(Box::new(move || {
+                let bl = bl.clone();
+                Box::pin(async move {
+                    bl.notify_waiters();
+                })
+            }))
+            .await;
+    });
+
+    let dc_clone = dc.clone();
+    tokio::spawn(async move {
+        dc_clone
+            .set_buffered_amount_low_threshold(peerrpc_protocol::BUFFERED_AMOUNT_HIGH as usize)
+            .await;
+    });
+
+    // Tear down sends if the DataChannel closes.
+    let cl = closed.clone();
+    dc.on_close(Box::new(move || {
+        let cl = cl.clone();
+        Box::pin(async move {
+            cl.notify_waiters();
         })
     }));
 }
