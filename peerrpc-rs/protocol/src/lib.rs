@@ -43,9 +43,19 @@ pub use google::rpc::Status;
 pub const INLINE_MAX: usize = 16 * 1024;
 
 /// Maximum encoded size of a single length-prefixed frame. This is the
-/// negotiated SCTP max-message-size (256 KiB); every frame MUST stay at
-/// or below it or the peer (browsers in particular) reject the send and
-/// tear down the DataChannel.
+/// negotiated SCTP max-message-size; every frame MUST stay at or below
+/// it or the peer (browsers in particular) reject the send and tear down
+/// the DataChannel.
+///
+/// peerrpc peers advertise a=max-message-size:262144 in their local
+/// SDPs (and set can_send=Unbounded on the webrtc-rs SettingEngine) so
+/// the negotiation reaches 256 KiB. Once both sides advertise ≥256
+/// KiB, chunk sizes of 255 KiB are safe.
+///
+/// If a peer does NOT advertise (e.g. a vanilla browser against a
+/// vanilla webrtc-rs with no injection), the negotiation falls back
+/// to 64 KiB and 255 KiB chunks will be rejected — that's a peer
+/// configuration issue, not a protocol limit.
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 
 /// Worst-case bytes added by the 4-byte length prefix plus the protobuf

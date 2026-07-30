@@ -26,6 +26,20 @@ import { Frame, ResponseFrame } from "./gen/peerrpc/peerrpc_pb.js";
  * transport-layer thresholds only (the wire carries total_size/offset/
  * data on Chunk), so each side may pick its own value.
  */
+// SCTP max-message-size is the wire-level frame ceiling negotiated
+// per RFC 8831. Both peers advertise a=max-message-size in their
+// local SDP; the SCTP transport picks min(remote, local can-send).
+//
+// peerrpc peers inject a=max-message-size:262144 into their local
+// SDPs so the negotiation reaches 256 KiB (pion already defaults to
+// this; webrtc-rs needs the injection + can_send=Unbounded on the
+// SettingEngine). Once both sides advertise ≥256 KiB, chunk sizes
+// of 255 KiB are safe.
+//
+// If a peer does NOT advertise (e.g. a vanilla browser against a
+// vanilla webrtc-rs with no injection), the negotiation falls back
+// to 64 KiB and 255 KiB chunks will be rejected — that's a peer
+// configuration issue, not a protocol limit.
 const MAX_FRAME_BYTES = 256 * 1024;
 const FRAME_OVERHEAD = 1 * 1024; // 4-byte prefix + protobuf envelope (real ~40 B)
 

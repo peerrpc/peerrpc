@@ -44,8 +44,13 @@ import (
 // they are NOT carried on the wire (Chunk carries total_size/offset/
 // data), so each side may pick its own value without a protocol change.
 const (
-	// maxFrameBytes is the negotiated SCTP max-message-size (256 KiB).
-	// Every encoded frame MUST stay at or below this.
+	// maxFrameBytes is the negotiated SCTP max-message-size. Every
+	// encoded frame MUST stay at or below this. peerrpc peers advertise
+	// a=max-message-size:262144 in their local SDPs (pion already
+	// defaults to 262144; webrtc-rs needs the SDP injection plus
+	// can_send=Unbounded on its SettingEngine) so the negotiation
+	// reaches 256 KiB. Once both sides advertise ≥256 KiB, chunk sizes
+	// of 255 KiB are safe.
 	maxFrameBytes = 256 * 1024
 	// frameOverhead is the worst-case bytes added by the 4-byte length
 	// prefix plus the protobuf Frame/Routing/Data/Chunk envelope. 1 KiB
