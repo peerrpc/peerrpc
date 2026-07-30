@@ -42,14 +42,27 @@ pub use google::rpc::Status;
 /// Inline payload threshold: requests ≤ this ride in Call.inline_data.
 pub const INLINE_MAX: usize = 16 * 1024;
 
-/// Single Data.message threshold: payloads > this use Chunk frames.
-pub const MESSAGE_MAX: usize = 256 * 1024;
+/// Maximum encoded size of a single length-prefixed frame. This is the
+/// negotiated SCTP max-message-size (256 KiB); every frame MUST stay at
+/// or below it or the peer (browsers in particular) reject the send and
+/// tear down the DataChannel.
+const MAX_FRAME_BYTES: usize = 256 * 1024;
 
-/// Per-chunk payload size when fragmenting large messages.
-pub const CHUNK_SIZE: usize = 256 * 1024;
+/// Worst-case bytes added by the 4-byte length prefix plus the protobuf
+/// Frame/Routing/Data/Chunk envelope. 1 KiB is far larger than the real
+/// ~40-80 bytes, leaving a safety margin (matches Go/TS).
+const FRAME_OVERHEAD: usize = 1 * 1024;
+
+/// Single Data.message threshold: payloads > this use Chunk frames.
+/// Sized so the encoded frame fits under the SCTP max-message-size.
+pub const MESSAGE_MAX: usize = MAX_FRAME_BYTES - FRAME_OVERHEAD;
+
+/// Per-chunk payload size when fragmenting large messages. Sized so the
+/// encoded frame fits under the SCTP max-message-size.
+pub const CHUNK_SIZE: usize = MAX_FRAME_BYTES - FRAME_OVERHEAD;
 
 /// Maximum payload size for a single length-prefixed frame.
-pub const MAX_FRAME_SIZE: usize = 256 * 1024;
+pub const MAX_FRAME_SIZE: usize = MAX_FRAME_BYTES;
 
 /// High-watermark for outbound backpressure (bytes in SCTP buffer).
 pub const BUFFERED_AMOUNT_HIGH: u64 = 1 << 20; // 1 MiB
