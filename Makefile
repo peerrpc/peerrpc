@@ -5,7 +5,7 @@ CARGO ?= cargo
 
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
-.PHONY: all-test test-go test-rust test-ts
+.PHONY: test-all test-go test-rs test-ts
 .PHONY: run-signal run-ts-echo run-ts-echo-react run-echo-server run-ts-echo-server run-echo
 .PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-echo-rs
@@ -30,10 +30,10 @@ test-vectors:
 # Runs every SDK and server test suite. Each sub-target is independent
 # so you can run a single language:
 #   make test-go
-#   make test-rust
+#   make test-rs
 #   make test-ts
 
-all-test: test-go test-rust test-ts
+test-all: test-go test-rs test-ts
 
 # Go: the main SDK (with -race) + the standalone server modules.
 # Examples are demo binaries with no tests, so they are skipped.
@@ -46,7 +46,7 @@ test-go:
 	done
 
 # Rust: the SDK workspace, then the standalone example crates.
-test-rust:
+test-rs:
 	$(CARGO) test --manifest-path peerrpc-rs/Cargo.toml --workspace
 	cd examples/rs/echo && $(CARGO) test
 	cd examples/rs/facade && $(CARGO) test
