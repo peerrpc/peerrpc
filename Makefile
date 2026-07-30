@@ -5,7 +5,7 @@ CARGO ?= cargo
 
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
-.PHONY: run-signal run-ts-echo run-echo
+.PHONY: run-signal run-ts-echo run-echo-server run-echo
 .PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-echo-rs
 .PHONY: run-interop-server run-interop-rs run-interop-e2e run-sample
@@ -46,11 +46,12 @@ build-ts:
 build-rs:
 	$(CARGO) build --manifest-path peerrpc-rs/Cargo.toml --lib
 
-# ── Quick start: signal-server + browser echo sample ────────────
+# ── Quick start: signal-server + echo server + browser client ───
 #
 # Run each in a separate terminal:
-#   make run-signal    # starts the signal-server with auto-TLS
-#   make run-ts-echo   # starts the Vite dev server for the echo page
+#   make run-signal       # starts the signal-server with auto-TLS
+#   make run-echo-server  # starts the Go echo RPC server (all 4 types)
+#   make run-ts-echo      # starts the Vite dev server for the echo page
 #
 # Then open the printed Vite URL, accept the self-signed cert warning
 # for https://localhost:8443, and click "Connect".
@@ -61,13 +62,17 @@ ECHO_PORT   ?= 5173
 run-signal:
 	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) --auto-tls
 
+run-echo-server:
+	cd examples/go/echo-server && $(GO) run .
+
 run-ts-echo:
 	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
-# Convenience: prints instructions for the two-terminal quick start.
+# Convenience: prints instructions for the three-terminal quick start.
 run-echo:
 	@echo "Run each in a separate terminal:"
 	@echo "  make run-signal"
+	@echo "  make run-echo-server"
 	@echo "  make run-ts-echo"
 	@echo ""
 	@echo "Then open the Vite URL, accept the cert warning at"
