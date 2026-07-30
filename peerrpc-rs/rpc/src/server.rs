@@ -84,7 +84,7 @@ impl Server {
                                 match try_decode_frame(&buf) {
                                     Ok(Some((frame, consumed))) => {
                                         buf.drain(..consumed);
-                                        Self::handle_frame(frame, &self.methods, &streams, &resp_tx, &mut reasm);
+                                        Self::handle_frame(frame, &self.methods, &streams, &resp_tx, &mut reasm).await;
                                     }
                                     Ok(None) => break,
                                     Err(e) => {
@@ -105,7 +105,7 @@ impl Server {
         }
     }
 
-    fn handle_frame(
+    async fn handle_frame(
         frame: Frame,
         methods: &HashMap<String, MethodDesc>,
         streams: &Arc<Mutex<HashMap<i32, StreamState>>>,
@@ -135,7 +135,7 @@ impl Server {
                 }
 
                 {
-                    let mut guard = streams.try_lock().unwrap();
+                    let mut guard = streams.lock().await;
                     if guard.contains_key(&seq) {
                         Self::end_stream_with_error(seq, resp_tx, "duplicate sequence");
                         return;
@@ -189,7 +189,7 @@ impl Server {
                     None => None,
                 };
                 if let Some(payload) = payload {
-                    let guard = streams.try_lock().unwrap();
+                    let guard = streams.lock().await;
                     if let Some(state) = guard.get(&seq) {
                         let _ = state.inbound.try_send(payload);
                     }
@@ -197,12 +197,12 @@ impl Server {
             }
             Some(FType::End(end)) => {
                 if end.close_send {
-                    let guard = streams.try_lock().unwrap();
+                    let guard = streams.lock().await;
                     if let Some(state) = guard.get(&seq) {
                         state.half_close.notify_waiters();
                     }
                 } else {
-                    let _ = streams.try_lock().unwrap().remove(&seq);
+                    let _ = streams.lock().await.remove(&seq);
                 }
             }
             None => {}
