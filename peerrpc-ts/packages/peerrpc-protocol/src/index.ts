@@ -13,17 +13,33 @@
 
 import { Frame, ResponseFrame } from "./gen/peerrpc/peerrpc_pb.js";
 
-/** Maximum payload size for a single length-prefixed frame. */
-export const MAX_FRAME_SIZE = 256 * 1024;
+/**
+ * SCTP / framing thresholds.
+ *
+ * WebRTC DataChannels negotiate an SCTP max-message-size (256 KiB by
+ * default). Each dc.send() carries one ENCODED frame = 4-byte length
+ * prefix + protobuf envelope + payload. That envelope (~40 bytes for a
+ * Chunk) means a payload of exactly 256 KiB would push the encoded
+ * frame over the limit, so the browser rejects it with "Trying to send
+ * message larger than max-message-size". MESSAGE_MAX / CHUNK_SIZE are
+ * therefore sized below MAX_FRAME_SIZE to leave headroom. These are
+ * transport-layer thresholds only (the wire carries total_size/offset/
+ * data on Chunk), so each side may pick its own value.
+ */
+const MAX_FRAME_BYTES = 256 * 1024;
+const FRAME_OVERHEAD = 1 * 1024; // 4-byte prefix + protobuf envelope (real ~40 B)
+
+/** Maximum encoded frame size (the negotiated SCTP max-message-size). */
+export const MAX_FRAME_SIZE = MAX_FRAME_BYTES;
 
 /** Inline payload threshold: requests ≤ this ride in Call.inline_data. */
 export const INLINE_MAX = 16 * 1024;
 
 /** Single Data.message threshold: payloads > this use Chunk frames. */
-export const MESSAGE_MAX = 256 * 1024;
+export const MESSAGE_MAX = MAX_FRAME_BYTES - FRAME_OVERHEAD;
 
 /** Per-chunk payload size when fragmenting large messages. */
-export const CHUNK_SIZE = 256 * 1024;
+export const CHUNK_SIZE = MAX_FRAME_BYTES - FRAME_OVERHEAD;
 
 /** High-watermark for outbound backpressure (bytes in SCTP buffer). */
 export const BUFFERED_AMOUNT_HIGH = 1 << 20; // 1 MiB

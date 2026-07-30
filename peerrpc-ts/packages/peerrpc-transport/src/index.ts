@@ -57,6 +57,14 @@ export class Channel {
   private reasm: Map<number, { total: number; buf: Uint8Array; got: number }> =
     new Map();
 
+  /**
+   * Optional progress callback fired as each inbound chunk is folded
+   * into its reassembly buffer. Signature: (seq, received, total).
+   * Callers (e.g. the RPC client) can filter by seq to attribute
+   * progress to a specific stream. `received` is in [0, total].
+   */
+  onReassembleProgress?: (seq: number, received: number, total: number) => void;
+
   constructor(dc: RTCDataChannel, cfg?: TransportConfig) {
     this.dc = dc;
     this.highWatermark = cfg?.bufferedAmountHigh ?? BUFFERED_AMOUNT_HIGH;
@@ -170,6 +178,11 @@ export class Channel {
     }
     state.buf.set(data, offset);
     state.got += data.length;
+    // Report per-chunk download progress (clamped to [0, total]).
+    if (this.onReassembleProgress) {
+      const got = Math.min(state.got, state.total);
+      this.onReassembleProgress(seq, got, state.total);
+    }
     if (state.got >= state.total) {
       const out = state.buf;
       this.reasm.delete(seq);

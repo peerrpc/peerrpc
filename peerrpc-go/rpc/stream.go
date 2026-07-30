@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	peerrpcpb "github.com/peerrpc/go/gen/proto/peerrpc"
+	"github.com/peerrpc/go/transport"
 )
 
 // ServerStream is the per-RPC object a MethodDesc.Handler receives.
@@ -118,21 +119,52 @@ func (s *ServerStream) Recv() ([]byte, error) {
 }
 
 // Send queues a response message. It returns once the multiplexer has
-// accepted the frame, NOT once the bytes are on the wire.
+// accepted the (last) frame, NOT once the bytes are on the wire.
+//
+// Payloads larger than transport.MessageMax (256 KiB) are split into
+// Data.chunk frames transparently, mirroring the client's sendPayload.
+// The receiver reassembles them into a single message, so a large Send
+// is observed as one message by the peer's Recv/recv.
 func (s *ServerStream) Send(b []byte) error {
 	// Begin must precede the first Data frame.
 	if err := s.mux.flushBeginOnce(s); err != nil {
 		return err
 	}
-	frame := &peerrpcpb.ResponseFrame{
-		Routing: &peerrpcpb.Routing{Sequence: int32(s.seq)},
-		Type: &peerrpcpb.ResponseFrame_Data{
-			Data: &peerrpcpb.Data{
-				Content: &peerrpcpb.Data_Message{Message: append([]byte(nil), b...)},
+	// Small message: a single Data.message frame.
+	if len(b) <= transport.MessageMax {
+		frame := &peerrpcpb.ResponseFrame{
+			Routing: &peerrpcpb.Routing{Sequence: int32(s.seq)},
+			Type: &peerrpcpb.ResponseFrame_Data{
+				Data: &peerrpcpb.Data{
+					Content: &peerrpcpb.Data_Message{Message: append([]byte(nil), b...)},
+				},
 			},
-		},
+		}
+		return s.mux.queue(frame)
 	}
-	return s.mux.queue(frame)
+	// Large message: fragment into Data.chunk frames. total_size lets
+	// the peer allocate the buffer up front and detect loss.
+	total := int32(len(b))
+	for offset := 0; offset < len(b); offset += transport.ChunkSize {
+		end := offset + transport.ChunkSize
+		if end > len(b) {
+			end = len(b)
+		}
+		frame := &peerrpcpb.ResponseFrame{
+			Routing: &peerrpcpb.Routing{Sequence: int32(s.seq)},
+			Type: &peerrpcpb.ResponseFrame_Data{Data: &peerrpcpb.Data{
+				Content: &peerrpcpb.Data_Chunk{Chunk: &peerrpcpb.Chunk{
+					TotalSize: total,
+					Offset:    int32(offset),
+					Data:      append([]byte(nil), b[offset:end]...),
+				}},
+			}},
+		}
+		if err := s.mux.queue(frame); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetHeader attaches header metadata. MUST be called before the first

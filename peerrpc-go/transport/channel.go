@@ -29,17 +29,40 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Thresholds from PLAN.md §1.2.
+// SCTP / framing thresholds.
+//
+// WebRTC DataChannels negotiate an SCTP max-message-size (256 KiB by
+// default, per pion's a=max-message-size:262144 and the browser). Each
+// dc.send() carries one ENCODED frame = 4-byte length prefix + protobuf
+// envelope (Routing + Data tags) + payload. That envelope is ~40 bytes
+// for a Chunk frame, so a payload of exactly 256 KiB would push the
+// encoded frame just over the limit and the browser rejects it with
+// "Trying to send message larger than max-message-size".
+//
+// We reserve frameOverhead so the encoded frame stays safely under the
+// negotiated max. These are transport-layer chunking thresholds only;
+// they are NOT carried on the wire (Chunk carries total_size/offset/
+// data), so each side may pick its own value without a protocol change.
 const (
+	// maxFrameBytes is the negotiated SCTP max-message-size (256 KiB).
+	// Every encoded frame MUST stay at or below this.
+	maxFrameBytes = 256 * 1024
+	// frameOverhead is the worst-case bytes added by the 4-byte length
+	// prefix plus the protobuf Frame/Routing/Data/Chunk envelope. 1 KiB
+	// is far larger than the real ~40 bytes, giving a safety margin.
+	frameOverhead = 1 * 1024
+
 	// InlineMax is the largest payload that may ride in Call.inline_data
 	// or Begin.inline_data. Above this, frames use Data.message or
 	// Data.chunk.
 	InlineMax = 16 * 1024
 	// MessageMax is the largest single Data.message payload. Larger
-	// logical payloads MUST be split into Chunk frames.
-	MessageMax = 256 * 1024
-	// ChunkSize is the per-chunk payload size when fragmenting.
-	ChunkSize = 256 * 1024
+	// logical payloads MUST be split into Chunk frames. Sized so the
+	// encoded frame fits under the SCTP max-message-size.
+	MessageMax = maxFrameBytes - frameOverhead
+	// ChunkSize is the per-chunk payload size when fragmenting. Sized so
+	// the encoded frame fits under the SCTP max-message-size.
+	ChunkSize = maxFrameBytes - frameOverhead
 	// BufferedAmountHigh is the high-watermark (bytes) above which the
 	// channel pauses new Send calls until the DataChannel drains.
 	BufferedAmountHigh = 1 << 20 // 1 MiB

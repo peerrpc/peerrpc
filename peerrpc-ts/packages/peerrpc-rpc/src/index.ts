@@ -50,6 +50,21 @@ export interface Status {
 /** Header metadata (multi-valued map). */
 export type Metadata = Record<string, string[]>;
 
+/**
+ * Optional progress callbacks for a single invocation. Both are
+ * opt-in; passing neither leaves behavior identical to before.
+ *
+ *   - onUploadProgress: fired as each outbound chunk frame is sent.
+ *     `sent`/`total` are byte counts; for payloads ≤ MESSAGE_MAX a
+ *     single call with sent===total is made.
+ *   - onDownloadProgress: fired as each inbound chunk frame is folded
+ *     into the reassembly buffer. `received`/`total` are byte counts.
+ */
+export interface InvokeOptions {
+  onUploadProgress?: (sent: number, total: number) => void;
+  onDownloadProgress?: (received: number, total: number) => void;
+}
+
 interface StreamState {
   seq: number;
   inbound: AsyncQueue<Uint8Array>;
@@ -67,6 +82,10 @@ export class Client {
   private ch: Channel;
   private streams: Map<number, StreamState> = new Map();
   private seqAlloc: number = 1;
+  // Per-sequence download-progress callbacks, forwarded from the
+  // transport's chunk reassembly.
+  private downloadProgress: Map<number, (received: number, total: number) => void> =
+    new Map();
 
   constructor(ch: Channel) {
     this.ch = ch;
@@ -79,6 +98,12 @@ export class Client {
       }
     });
     ch.onClose(() => this.failAll());
+    // Forward transport chunk-reassembly progress to the stream that
+    // registered a callback for that sequence.
+    ch.onReassembleProgress = (seq, received, total) => {
+      const cb = this.downloadProgress.get(seq);
+      if (cb) cb(received, total);
+    };
   }
 
   /**
@@ -88,9 +113,13 @@ export class Client {
   async invokeUnary(
     method: string,
     req: Uint8Array,
-    metadata?: Metadata
+    metadata?: Metadata,
+    opts?: InvokeOptions,
   ): Promise<{ response: Uint8Array; status: Status }> {
     const stream = this.openStream();
+    if (opts?.onDownloadProgress) {
+      this.downloadProgress.set(stream.seq, opts.onDownloadProgress);
+    }
 
     // Build Call frame.
     const call = new Call({
@@ -116,7 +145,7 @@ export class Client {
 
     // Send non-inline payload if any.
     if (call.inlineData === undefined && req.length > 0) {
-      await this.sendPayload(stream.seq, req);
+      await this.sendPayload(stream.seq, req, opts?.onUploadProgress);
     }
 
     // Half-close immediately (Unary).
@@ -126,7 +155,9 @@ export class Client {
     }));
 
     // Collect exactly one response.
-    return this.collectUnary(stream);
+    const result = await this.collectUnary(stream);
+    this.downloadProgress.delete(stream.seq);
+    return result;
   }
 
   /**
@@ -136,9 +167,13 @@ export class Client {
   async invokeServerStreaming(
     method: string,
     req: Uint8Array,
-    metadata?: Metadata
+    metadata?: Metadata,
+    opts?: InvokeOptions,
   ): Promise<ClientStream> {
     const stream = this.openStream();
+    if (opts?.onDownloadProgress) {
+      this.downloadProgress.set(stream.seq, opts.onDownloadProgress);
+    }
 
     const call = new Call({ method, protocolVersion: 1 });
     if (metadata) {
@@ -157,7 +192,7 @@ export class Client {
       type: { case: "call", value: call },
     }));
     if (call.inlineData === undefined && req.length > 0) {
-      await this.sendPayload(stream.seq, req);
+      await this.sendPayload(stream.seq, req, opts?.onUploadProgress);
     }
     await this.ch.send(new Frame({
       routing: new Routing({ sequence: stream.seq }),
@@ -236,7 +271,11 @@ export class Client {
     return stream;
   }
 
-  private async sendPayload(seq: number, payload: Uint8Array): Promise<void> {
+  private async sendPayload(
+    seq: number,
+    payload: Uint8Array,
+    onProgress?: (sent: number, total: number) => void,
+  ): Promise<void> {
     if (payload.length <= MESSAGE_MAX) {
       await this.ch.send(new Frame({
         routing: new Routing({ sequence: seq }),
@@ -247,6 +286,7 @@ export class Client {
           }),
         },
       }));
+      onProgress?.(payload.length, payload.length);
       return;
     }
     for (let off = 0; off < payload.length; off += CHUNK_SIZE) {
@@ -268,6 +308,7 @@ export class Client {
           }),
         },
       }));
+      onProgress?.(end, payload.length);
     }
   }
 
@@ -322,6 +363,7 @@ export class Client {
         stream.inbound.close();
         stream.resolveEnd(stream.status);
         this.streams.delete(seq);
+        this.downloadProgress.delete(seq);
         break;
       }
     }

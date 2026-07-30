@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -259,5 +260,104 @@ func TestIntegration_BidiUnordered(t *testing.T) {
 	// After half-close the server returns OK -> EOF.
 	if _, err := stream.Recv(); err != io.EOF {
 		t.Fatalf("expected EOF after CloseSend, got %v", err)
+	}
+}
+
+// TestIntegration_LargeUnaryChunking exercises the server→client chunk
+// path: the server sends a response larger than transport.MessageMax
+// (256 KiB), which ServerStream.Send must split into Data.chunk frames
+// that the client reassembles into one message. This guards the
+// symmetry between client sendPayload (chunked) and server Send
+// (chunked).
+func TestIntegration_LargeUnaryChunking(t *testing.T) {
+	// Fill a 1 MiB payload with a recognizable pattern and have the
+	// server echo it verbatim. 1 MiB splits into four 256 KiB chunks.
+	const size = 1024 * 1024
+	want := make([]byte, size)
+	for i := range want {
+		want[i] = byte(i % 251)
+	}
+	echoLarge := func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
+		req, err := s.Recv()
+		if err != nil {
+			return rpc.Err(13, err)
+		}
+		if err := s.Send(req); err != nil {
+			return rpc.Err(13, err)
+		}
+		return rpc.OK()
+	}
+	srv := rpc.NewServer()
+	srv.RegisterService(rpc.ServiceDesc{
+		ServiceName: "echo.Echo",
+		Methods:     []rpc.MethodDesc{{Method: "LargeEcho", Kind: rpc.MethodKindUnary, Handler: echoLarge}},
+	})
+
+	cli, teardown := spinUpPair(t, srv, "large-unary")
+	defer teardown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	resp, status := cli.InvokeUnary(ctx, "/echo.Echo/LargeEcho", want, nil)
+	if status.Code != 0 {
+		t.Fatalf("InvokeUnary status: code=%d msg=%q", status.Code, status.Message)
+	}
+	if len(resp) != len(want) {
+		t.Fatalf("response length: got %d want %d", len(resp), len(want))
+	}
+	for i := range want {
+		if resp[i] != want[i] {
+			t.Fatalf("response mismatch at offset %d: got %d want %d", i, resp[i], want[i])
+		}
+	}
+}
+
+// TestIntegration_LargeServerStreamChunking verifies a server-streaming
+// response larger than transport.MessageMax is delivered as one
+// reassembled message via the client's stream.Recv.
+func TestIntegration_LargeServerStreamChunking(t *testing.T) {
+	const size = 512 * 1024 // two 256 KiB chunks
+	want := make([]byte, size)
+	for i := range want {
+		want[i] = byte(i % 251)
+	}
+	downloadHandler := func(ctx context.Context, s *rpc.ServerStream) *rpc.Status {
+		if err := s.Send(want); err != nil {
+			return rpc.Err(13, err)
+		}
+		return rpc.OK()
+	}
+	srv := rpc.NewServer()
+	srv.RegisterService(rpc.ServiceDesc{
+		ServiceName: "echo.Echo",
+		Methods:     []rpc.MethodDesc{{Method: "LargeDownload", Kind: rpc.MethodKindServerStreaming, Handler: downloadHandler}},
+	})
+
+	cli, teardown := spinUpPair(t, srv, "large-stream")
+	defer teardown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	stream, st := cli.InvokeServerStreaming(ctx, "/echo.Echo/LargeDownload", []byte(strconv.Itoa(size)), nil)
+	if st.Code != 0 {
+		t.Fatalf("InvokeServerStreaming status: %+v", st)
+	}
+	msg, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Recv: %v", err)
+	}
+	if len(msg) != len(want) {
+		t.Fatalf("msg length: got %d want %d", len(msg), len(want))
+	}
+	for i := range want {
+		if msg[i] != want[i] {
+			t.Fatalf("msg mismatch at offset %d: got %d want %d", i, msg[i], want[i])
+		}
+	}
+	// Server returns OK -> EOF after the single response.
+	if _, err := stream.Recv(); err != io.EOF {
+		t.Fatalf("expected EOF after download, got %v", err)
 	}
 }

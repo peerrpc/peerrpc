@@ -283,10 +283,19 @@ export async function dial(
   // we keep the trickle path so latency-sensitive callers don't
   // regress.
   let remoteDescSet = false;
+  // The signal-server broadcasts to EVERY peer in the service, so if
+  // more than one Answerer is present (e.g. a stale server peer that
+  // never cleanly left) the Offerer may receive several answers. An
+  // Offerer applies exactly ONE answer; a second setRemoteDescription
+  // would throw InvalidStateError ("wrong state: stable"). Track that
+  // we have already accepted an answer and ignore the rest.
+  let gotAnswer = false;
   const pending: RTCIceCandidateInit[] = [];
 
   signal.onMessage(async (msg) => {
     if (msg.type === "answer") {
+      if (gotAnswer) return; // already paired with an Answerer
+      gotAnswer = true;
       await peer.acceptAnswer(msg.sdp!);
       remoteDescSet = true;
       for (const c of pending) {
@@ -299,10 +308,12 @@ export async function dial(
         sdpMid: msg.sdpMid ?? null,
         sdpMLineIndex: msg.sdpMLineIndex ?? null,
       };
-      if (remoteDescSet) {
-        await peer.addCandidate(c);
-      } else {
+      if (!gotAnswer) {
+        // Candidate arrived before the answer; buffer it and apply
+        // once the remote description is set.
         pending.push(c);
+      } else if (remoteDescSet) {
+        await peer.addCandidate(c);
       }
     }
   });
