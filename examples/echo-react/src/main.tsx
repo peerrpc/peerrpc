@@ -14,7 +14,6 @@
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { usePeerRPC, useUnary, useServerStream, useConnected } from "@peerrpc/react";
-import { WebSocketSignal } from "@peerrpc/signal";
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -31,21 +30,12 @@ function App(): JSX.Element {
     setLogLines((prev) => [...prev, msg]);
   }, []);
 
-  // createSignal returns a connected WebSocketSignal. usePeerRPC calls
-  // this inside its async connect(); the subsequent peer.createOffer()
-  // gives the WebSocket enough time to open before the first send().
+  // usePeerRPC delegates the full dial (signal transport + WebRTC +
+  // rpc.Client) to the @peerrpc/peerrpc facade via the target URI.
+  const target = `peerrpc+ws://${new URL(signalUrl).host}/${service}`;
   const rpc = usePeerRPC({
-    createSignal: () => {
-      const sig = new WebSocketSignal({
-        url: signalUrl,
-        service,
-        peerId: "react-echo-" + Math.random().toString(36).slice(2, 8),
-      });
-      // Fire-and-forget: usePeerRPC.connect awaits peer.createOffer()
-      // which overlaps with the WebSocket handshake.
-      sig.connect().catch((e) => log(`signal connect: ${e}`));
-      return sig;
-    },
+    target,
+    dialOptions: { peerId: "react-echo-" + Math.random().toString(36).slice(2, 8) },
   });
 
   const connected = useConnected(rpc);
@@ -53,9 +43,9 @@ function App(): JSX.Element {
   const stream = useServerStream(rpc.client, "/echo.Echo/Stream", (raw) => dec.decode(raw));
 
   const onConnect = useCallback(() => {
-    log(`dialing ${signalUrl} (service ${service}) ...`);
+    log(`dialing ${target} ...`);
     rpc.connect().catch((e) => log(`dial failed: ${e}`));
-  }, [rpc, signalUrl, service, log]);
+  }, [rpc, target, log]);
 
   const onUnary = useCallback(async () => {
     log(`Unary /echo.Echo/Echo: "${request}"`);

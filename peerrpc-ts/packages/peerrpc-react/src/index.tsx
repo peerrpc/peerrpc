@@ -9,11 +9,14 @@
  * The hooks decouple the React render cycle from the PeerRPC
  * event-driven transport. State updates are batched; effect cleanup
  * tears down streams and listeners.
+ *
+ * usePeerRPC delegates the full connection (signal transport + WebRTC
+ * offer/answer/ICE + rpc.Client) to the @peerrpc/peerrpc facade's
+ * dial(target), which already guards against multi-answer fan-out.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Channel } from "@peerrpc/transport";
-import { Peer, type PeerConfig, type SignalTransport, type SignalMessage } from "@peerrpc/peer";
+import { dial, type Conn, type DialOptions } from "@peerrpc/peerrpc";
 import { Client, type Status, type Metadata } from "@peerrpc/rpc";
 
 // ---------------------------------------------------------------------------
@@ -21,13 +24,14 @@ import { Client, type Status, type Metadata } from "@peerrpc/rpc";
 // ---------------------------------------------------------------------------
 
 export interface PeerRPCConfig {
-  /** PeerConnection tuning. */
-  peer?: PeerConfig;
   /**
-   * Factory that returns a SignalTransport the Peer uses to exchange
-   * SDP/ICE. Called once when connect() is invoked.
+   * Target URI for the @peerrpc/peerrpc facade dial(), e.g.
+   * "peerrpc+ws://localhost:8443/echo.Echo". The facade builds the
+   * signal transport (WebSocketSignal for ws://) and the rpc.Client.
    */
-  createSignal: () => SignalTransport;
+  target: string;
+  /** Optional dial options (peer config, token, explicit peer_id). */
+  dialOptions?: DialOptions;
 }
 
 export interface PeerRPCState {
@@ -51,19 +55,25 @@ export type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
  * The hook returns a stable object whose fields update as the
  * connection progresses through idle → connecting → connected.
  *
- * The caller MUST provide a `createSignal` factory that returns a
- * SignalTransport implementation (e.g. WebSocketSignal wrapping a
- * signal-server URL, or a custom in-process transport).
+ * Connection is delegated to the @peerrpc/peerrpc facade dial(target),
+ * which builds the signal transport from the target URI and wires the
+ * rpc.Client. The facade's dial already guards against the multi-answer
+ * fan-out that occurs when several Answerers are present in the same
+ * signaling service.
  *
  * On unmount the hook automatically calls disconnect().
+ *
+ * @example
+ *   const rpc = usePeerRPC({ target: "peerrpc+ws://localhost:8443/echo.Echo" });
+ *   ...
+ *   <button onClick={() => rpc.connect()}>Connect</button>
  */
 export function usePeerRPC(config: PeerRPCConfig): PeerRPCState {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [client, setClient] = useState<Client | null>(null);
 
-  const peerRef = useRef<Peer | null>(null);
-  const channelRef = useRef<Channel | null>(null);
+  const connRef = useRef<Conn | null>(null);
   const configRef = useRef(config);
   configRef.current = config;
 
@@ -73,46 +83,9 @@ export function usePeerRPC(config: PeerRPCConfig): PeerRPCState {
     setError(null);
 
     try {
-      const signal = configRef.current.createSignal();
-      const peer = new Peer(configRef.current.peer);
-      peerRef.current = peer;
-
-      // Offerer flow: create offer, send via signal, wait for answer.
-      const offerSdp = await peer.createOffer();
-      signal.send({ type: "offer", sdp: offerSdp });
-
-      // Pump inbound signal messages.
-      signal.onMessage((msg: SignalMessage) => {
-        switch (msg.type) {
-          case "answer":
-            peer.acceptAnswer(msg.sdp!).catch(() => {});
-            break;
-          case "candidate":
-            peer.addCandidate({
-              candidate: msg.candidate!,
-              sdpMid: msg.sdpMid ?? null,
-              sdpMLineIndex: msg.sdpMLineIndex ?? null,
-            }).catch(() => {});
-            break;
-        }
-      });
-
-      // Forward local ICE candidates via signal.
-      peer.onIceCandidate((c) => {
-        if (c) {
-          signal.send({
-            type: "candidate",
-            candidate: c.candidate,
-            sdpMid: c.sdpMid ?? null,
-            sdpMLineIndex: c.sdpMLineIndex ?? null,
-          });
-        }
-      });
-
-      const channel = await peer.waitForChannel();
-      channelRef.current = channel;
-      const rpcClient = new Client(channel);
-      setClient(rpcClient);
+      const conn = await dial(configRef.current.target, configRef.current.dialOptions ?? {});
+      connRef.current = conn;
+      setClient(conn.client);
       setStatus("connected");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -121,10 +94,9 @@ export function usePeerRPC(config: PeerRPCConfig): PeerRPCState {
   }, [status]);
 
   const disconnect = useCallback(() => {
-    channelRef.current?.close();
-    channelRef.current = null;
-    peerRef.current?.close();
-    peerRef.current = null;
+    // Conn.close releases the peer + signal transport.
+    connRef.current?.close().catch(() => {});
+    connRef.current = null;
     setClient(null);
     setStatus("idle");
   }, []);
@@ -132,8 +104,7 @@ export function usePeerRPC(config: PeerRPCConfig): PeerRPCState {
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
-      channelRef.current?.close();
-      peerRef.current?.close();
+      connRef.current?.close().catch(() => {});
     };
   }, []);
 

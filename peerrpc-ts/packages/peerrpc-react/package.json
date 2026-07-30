@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@peerrpc/peer": "*",
+    "@peerrpc/peerrpc": "*",
     "@peerrpc/rpc": "*",
     "@peerrpc/transport": "*"
   }
