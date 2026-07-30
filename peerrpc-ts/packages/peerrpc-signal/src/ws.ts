@@ -8,7 +8,13 @@
  */
 
 import type { SignalMessage } from "@peerrpc/peer";
-import { SignalMessage as WireSignalMessage } from "@peerrpc/protocol/gen/peerrpc/signaling/signaling_pb.js";
+import {
+  SignalMessage as WireSignalMessage,
+  AnnounceRequest,
+  SdpOffer,
+  SdpAnswer,
+  IceCandidate,
+} from "@peerrpc/protocol/gen/peerrpc/signaling/signaling_pb.js";
 import type { AnnounceRequest_Role } from "@peerrpc/protocol/gen/peerrpc/signaling/signaling_pb.js";
 
 export interface WebSocketSignalConfig {
@@ -88,11 +94,11 @@ export class WebSocketSignal {
       service: this.cfg.service,
       body: {
         case: "announce",
-        value: {
+        value: new AnnounceRequest({
           peerId: this.cfg.peerId,
           role: this.cfg.role ?? 1 /* ROLE_CLIENT */,
           ...(this.cfg.peerPubkey ? { peerPubkey: this.cfg.peerPubkey } : {}),
-        },
+        }),
       },
     });
     this.ws.send(encodeLengthPrefixed(announce));
@@ -123,19 +129,19 @@ function translateOutgoing(msg: SignalMessage): WireSignalMessage {
   const wire = new WireSignalMessage();
   switch (msg.type) {
     case "offer":
-      wire.body = { case: "offer", value: { sdp: msg.sdp ?? "" } };
+      wire.body = { case: "offer", value: new SdpOffer({ sdp: msg.sdp ?? "" }) };
       break;
     case "answer":
-      wire.body = { case: "answer", value: { sdp: msg.sdp ?? "" } };
+      wire.body = { case: "answer", value: new SdpAnswer({ sdp: msg.sdp ?? "" }) };
       break;
     case "candidate":
       wire.body = {
         case: "candidate",
-        value: {
+        value: new IceCandidate({
           candidate: msg.candidate ?? "",
           sdpMid: msg.sdpMid ?? "",
           sdpMlineIndex: msg.sdpMLineIndex ?? 0,
-        },
+        }),
       };
       break;
   }
