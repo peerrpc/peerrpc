@@ -243,14 +243,14 @@ impl Peer {
 
 #[async_trait]
 impl WireTransport for Peer {
-    async fn send_frame(&mut self, frame: Bytes) {
+    async fn send_frame(&mut self, frame: Bytes) -> Result<(), String> {
         if let Some(dc) = &self.dc {
-            let _ = dc.send(&frame).await;
-            return;
+            return dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string());
         }
         if let Some(dc) = self.dc_handle.lock().await.as_ref() {
-            let _ = dc.send(&frame).await;
+            return dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string());
         }
+        Err("peer: no data channel".into())
     }
 
     async fn recv_frame(&mut self) -> Option<Bytes> {

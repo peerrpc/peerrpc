@@ -25,14 +25,15 @@ struct MockTransport {
 
 #[async_trait]
 impl WireTransport for MockTransport {
-    async fn send_frame(&mut self, _frame: Bytes) {
+    async fn send_frame(&mut self, _frame: Bytes) -> Result<(), String> {
         self.sent.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 
     async fn recv_frame(&mut self) -> Option<Bytes> {
         let mut q = self.inbound.lock().await;
         if q.is_empty() {
-            // Block forever — the test will push frames before calling.
+            // Block forever - the test will push frames before calling.
             std::future::pending::<()>().await;
         }
         q.remove(0).into()

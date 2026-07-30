@@ -10,8 +10,10 @@ use bytes::Bytes;
 /// The byte-stream transport the Client multiplexes over.
 #[async_trait]
 pub trait WireTransport: Send + 'static {
-    /// Send raw length-prefixed wire bytes.
-    async fn send_frame(&mut self, frame: Bytes);
+    /// Send raw length-prefixed wire bytes. Returns Err when the
+    /// underlying transport is dead (e.g. DataChannel closed); the
+    /// run loop treats this as a fatal condition and stops.
+    async fn send_frame(&mut self, frame: Bytes) -> Result<(), String>;
 
     /// Receive the next inbound payload. Returns None when the
     /// transport is closed.
