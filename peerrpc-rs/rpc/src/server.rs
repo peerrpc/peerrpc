@@ -9,7 +9,7 @@ use peerrpc_protocol::{
     CHUNK_SIZE, MESSAGE_MAX,
 };
 use peerrpc_transport::Reassembler;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, Mutex};
 
 use crate::{Status, WireTransport};
 
@@ -99,7 +99,9 @@ impl Server {
                 }
                 Some(resp) = resp_rx.recv() => {
                     let bytes = encode_response_frame(&resp.frame);
-                    transport.send_frame(bytes).await;
+                    if transport.send_frame(bytes).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
@@ -126,7 +128,6 @@ impl Server {
                 };
 
                 let (inbound_tx, inbound_rx) = mpsc::channel(16);
-                let half_close = Arc::new(Notify::new());
 
                 if let Some(inline) = call.inline_data {
                     if !inline.is_empty() {
@@ -141,8 +142,7 @@ impl Server {
                         return;
                     }
                     guard.insert(seq, StreamState {
-                        inbound: inbound_tx,
-                        half_close: half_close.clone(),
+                        inbound: Some(inbound_tx),
                     });
                 }
 
@@ -160,7 +160,6 @@ impl Server {
                         seq,
                         method: call.method,
                         inbound: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
-                        half_close,
                         resp_tx: stream_resp_tx,
                         header_sent: AtomicBool::new(false),
                     };
@@ -189,17 +188,25 @@ impl Server {
                     None => None,
                 };
                 if let Some(payload) = payload {
-                    let guard = streams.lock().await;
-                    if let Some(state) = guard.get(&seq) {
-                        let _ = state.inbound.try_send(payload);
+                    let inbound_tx = {
+                        let guard = streams.lock().await;
+                        guard.get(&seq).and_then(|s| s.inbound.clone())
+                    };
+                    if let Some(tx) = inbound_tx {
+                        if tx.try_send(payload).is_err() {
+                            tracing::warn!("server: inbound queue full, dropping data for seq {seq}");
+                        }
                     }
                 }
             }
             Some(FType::End(end)) => {
                 if end.close_send {
-                    let guard = streams.lock().await;
-                    if let Some(state) = guard.get(&seq) {
-                        state.half_close.notify_waiters();
+                    // Half-close: drop the sender so the handler's recv()
+                    // returns None (EOF) after draining buffered messages.
+                    // The stream entry stays until endStream removes it.
+                    let mut guard = streams.lock().await;
+                    if let Some(state) = guard.get_mut(&seq) {
+                        state.inbound.take();
                     }
                 } else {
                     let _ = streams.lock().await.remove(&seq);
@@ -237,8 +244,9 @@ impl Default for Server {
 }
 
 struct StreamState {
-    inbound: mpsc::Sender<Vec<u8>>,
-    half_close: Arc<Notify>,
+    // Option so half-close can take() the sender, which makes the
+    // handler's recv() return None (EOF) after draining buffered items.
+    inbound: Option<mpsc::Sender<Vec<u8>>>,
 }
 
 pub struct ServerStream {
@@ -250,7 +258,6 @@ pub struct ServerStream {
     // with a 'static future (the &'a mut borrow can't escape the
     // function frame).
     inbound: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
-    half_close: Arc<Notify>,
     resp_tx: mpsc::UnboundedSender<RespFrame>,
     header_sent: AtomicBool,
 }
@@ -261,11 +268,13 @@ impl ServerStream {
     }
 
     pub async fn recv(&self) -> Option<Vec<u8>> {
+        // EOF is driven by the sender being dropped on half-close
+        // (handle_frame End{close_send} takes the sender). After the
+        // sender is dropped, recv() drains buffered messages then
+        // returns None. This avoids the racy select! between recv()
+        // and a Notify that did not store a permit.
         let mut guard = self.inbound.lock().await;
-        tokio::select! {
-            data = guard.recv() => data,
-            _ = self.half_close.notified() => None,
-        }
+        guard.recv().await
     }
 
     pub async fn send(&self, data: Vec<u8>) -> Result<(), String> {

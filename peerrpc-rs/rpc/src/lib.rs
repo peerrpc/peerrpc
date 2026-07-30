@@ -306,7 +306,9 @@ impl Client {
         loop {
             tokio::select! {
                 Some(frame) = outbound.recv() => {
-                    transport.send_frame(frame).await;
+                    if transport.send_frame(frame).await.is_err() {
+                        break;
+                    }
                 }
                 result = transport.recv_frame() => {
                     match result {
@@ -351,13 +353,17 @@ impl Client {
         match frame.r#type {
             Some(RType::Begin(begin)) => {
                 if let Some(data) = begin.inline_data {
-                    let _ = state.inbound.try_send(data);
+                    if state.inbound.try_send(data).is_err() {
+                        tracing::warn!("client: inbound queue full, dropping begin inline for seq {seq}");
+                    }
                 }
             }
             Some(RType::Data(data)) => {
                 match data.content {
                     Some(gen::data::Content::Message(msg)) => {
-                        let _ = state.inbound.try_send(msg);
+                        if state.inbound.try_send(msg).is_err() {
+                            tracing::warn!("client: inbound queue full, dropping data for seq {seq}");
+                        }
                     }
                     Some(gen::data::Content::Chunk(chunk)) => {
                         if let Some(full) = reasm.reassemble(
@@ -366,7 +372,9 @@ impl Client {
                             chunk.offset as usize,
                             &chunk.data,
                         ) {
-                            let _ = state.inbound.try_send(full);
+                            if state.inbound.try_send(full).is_err() {
+                                tracing::warn!("client: inbound queue full, dropping reassembled chunk for seq {seq}");
+                            }
                         }
                     }
                     None => {}
