@@ -80,7 +80,7 @@ impl Peer {
             open_notify,
             inbound_rx: Mutex::new(inbound_rx),
         };
-        Ok((peer, sdp))
+        Ok((peer, munge_max_message_size(sdp)))
     }
 
     pub async fn accept_offer(
@@ -143,7 +143,7 @@ impl Peer {
             open_notify,
             inbound_rx: Mutex::new(inbound_rx),
         };
-        Ok((peer, sdp))
+        Ok((peer, munge_max_message_size(sdp)))
     }
 
     pub async fn wait_for_data_channel(
@@ -298,4 +298,45 @@ async fn wait_ice_complete(pc: &Arc<RTCPeerConnection>) {
     }
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
+}
+
+/// The largest single RTCDataChannel.send() payload the peer should
+/// attempt, in bytes. Matches the transport chunk threshold so a
+/// chunked frame (256 KiB data + ~40 B envelope) fits.
+const ADVERTISED_MAX_MESSAGE_SIZE: u32 = 256 * 1024;
+
+/// Inject `a=max-message-size` into the application media section of
+/// the SDP. webrtc-rs does not emit this attribute, so per RFC 8831 the
+/// peer (browser) defaults to 65535 (64 KiB) and rejects any larger
+/// send with "Trying to send message larger than max-message-size".
+/// Advertising a larger value lets the browser send chunk-sized frames.
+///
+/// If the attribute is already present it is left untouched. Only the
+/// `m=application` section is affected. The original SDP's line endings
+/// are preserved by inserting the attribute as a raw substring right
+/// after the `m=application` line.
+fn munge_max_message_size(sdp: String) -> String {
+    if sdp.contains("a=max-message-size") {
+        return sdp; // already advertised (e.g. round-tripped)
+    }
+    // Detect the line terminator webrtc-rs used so we match it.
+    let nl = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
+    let attr = format!("a=max-message-size:{}{}", ADVERTISED_MAX_MESSAGE_SIZE, nl);
+
+    // Find the start of the m=application line and inject the attribute
+    // right after that line (beginning of its media section).
+    if let Some(idx) = sdp.find("m=application") {
+        // End of the m=application line.
+        if let Some(line_end) = sdp[idx..].find(nl) {
+            let insert_at = idx + line_end + nl.len();
+            let mut out = String::with_capacity(sdp.len() + attr.len());
+            out.push_str(&sdp[..insert_at]);
+            out.push_str(&attr);
+            out.push_str(&sdp[insert_at..]);
+            return out;
+        }
+    }
+    // No application section (unexpected for a DataChannel SDP); return
+    // unchanged rather than risk corrupting the SDP.
+    sdp
 }
