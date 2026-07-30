@@ -8,6 +8,7 @@
 
 import { Channel, type TransportConfig } from "@peerrpc/transport";
 import { DATACHANNEL_LABEL } from "@peerrpc/protocol";
+import { injectMaxMessageSize } from "./sdpMunge.js";
 
 /**
  * SignalMessage carries one signaling envelope between peers.
@@ -84,7 +85,9 @@ export class Peer {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     await this.waitForIceGathering();
-    return this.pc.localDescription!.sdp;
+    // Advertise a=max-message-size so the SCTP negotiation reaches
+    // 256 KiB (browser + vanilla webrtc-rs default to 64 KiB otherwise).
+    return injectMaxMessageSize(this.pc.localDescription!.sdp);
   }
 
   /**
@@ -102,7 +105,9 @@ export class Peer {
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
     await this.waitForIceGathering();
-    return this.pc.localDescription!.sdp;
+    // Advertise a=max-message-size so the SCTP negotiation reaches
+    // 256 KiB (webrtc-rs answerer caps at 64 KiB without this).
+    return injectMaxMessageSize(this.pc.localDescription!.sdp);
   }
 
   /**
