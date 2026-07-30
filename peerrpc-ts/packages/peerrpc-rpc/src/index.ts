@@ -18,6 +18,7 @@ import {
 } from "@peerrpc/protocol";
 import { Frame, Call, End, Data, Chunk, Routing } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
 import type { Channel } from "@peerrpc/transport";
+import { AsyncQueue } from "./queue.js";
 
 /** gRPC status codes (subset; see google.rpc.Code). */
 export enum Code {
@@ -51,7 +52,7 @@ export type Metadata = Record<string, string[]>;
 
 interface StreamState {
   seq: number;
-  inbound: Uint8Array[];
+  inbound: AsyncQueue<Uint8Array>;
   header: Metadata;
   trailer: Metadata;
   done: boolean;
@@ -224,7 +225,7 @@ export class Client {
     this.seqAlloc += 2; // odd = client-initiated
     const stream: StreamState = {
       seq,
-      inbound: [],
+      inbound: new AsyncQueue<Uint8Array>(),
       header: {},
       trailer: {},
       done: false,
@@ -318,6 +319,7 @@ export class Client {
         stream.status = end?.status
           ? { code: end.status.code, message: end.status.message }
           : { code: 0, message: "" };
+        stream.inbound.close();
         stream.resolveEnd(stream.status);
         this.streams.delete(seq);
         break;
@@ -328,32 +330,21 @@ export class Client {
   private async collectUnary(
     stream: StreamState
   ): Promise<{ response: Uint8Array; status: Status }> {
-    return new Promise((resolve) => {
-      const resolveWithInbound = (s: Status) => {
-        const resp = stream.inbound.length > 0
-          ? stream.inbound[0]
-          : new Uint8Array(0);
-        resolve({ response: resp, status: s });
-      };
-      stream.resolveEnd = resolveWithInbound;
-      // Check if response already arrived (race with End).
-      const check = () => {
-        if (stream.inbound.length > 0) {
-          const resp = stream.inbound[0];
-          if (stream.done) {
-            resolve({ response: resp, status: stream.status! });
-          } else {
-            // Wait for End.
-            stream.resolveEnd = (s) => resolve({ response: resp, status: s });
-          }
-        } else if (stream.done) {
-          resolve({ response: new Uint8Array(0), status: stream.status! });
-        } else {
-          setTimeout(check, 1);
-        }
-      };
-      check();
-    });
+    // recv() returns the first response or null at EOF. If data arrives
+    // before End we await the status; if End arrives first (no response),
+    // recv() returns null and we surface the status.
+    const resp = await stream.inbound.recv();
+    if (resp) {
+      // Wait for the End status.
+      return new Promise((resolve) => {
+        stream.resolveEnd = (s) => resolve({ response: resp, status: s });
+      });
+    }
+    // No response before EOF.
+    return {
+      response: new Uint8Array(0),
+      status: stream.status ?? { code: 0, message: "" },
+    };
   }
 
   private failAll(): void {
@@ -361,6 +352,7 @@ export class Client {
       if (!s.done) {
         s.done = true;
         s.status = { code: Code.UNAVAILABLE, message: "transport closed" };
+        s.inbound.close();
         s.resolveEnd(s.status);
       }
     }
@@ -432,29 +424,10 @@ export class ClientStream {
 
   /**
    * Receive the next response message. Returns null when the server
-   * has ended (EOF).
+   * has ended (EOF) or the transport closed.
    */
   async recv(): Promise<Uint8Array | null> {
-    // Drain already-arrived messages first.
-    if (this.state.inbound.length > 0) {
-      return this.state.inbound.shift()!;
-    }
-    if (this.state.done) {
-      return null; // EOF
-    }
-    // Poll until data or done.
-    return new Promise((resolve) => {
-      const poll = () => {
-        if (this.state.inbound.length > 0) {
-          resolve(this.state.inbound.shift()!);
-        } else if (this.state.done) {
-          resolve(null);
-        } else {
-          setTimeout(poll, 1);
-        }
-      };
-      poll();
-    });
+    return this.state.inbound.recv();
   }
 
   /** Response header (available after Begin arrives). */

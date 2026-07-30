@@ -28,6 +28,7 @@ import {
   Begin,
 } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
 import type { Channel } from "@peerrpc/transport";
+import { AsyncQueue } from "./queue.js";
 import { Code, type Status } from "./index.js";
 
 export { Code };
@@ -37,8 +38,7 @@ export type { Status };
 export class ServerStream {
   private seq: number;
   private ch: Channel;
-  private inbound: Uint8Array[] = [];
-  private sendClosed = false;
+  private inbound = new AsyncQueue<Uint8Array>();
   private headerSent = false;
 
   constructor(seq: number, ch: Channel, call: Call) {
@@ -54,31 +54,14 @@ export class ServerStream {
     this.inbound.push(data);
   }
 
-  /** Internal: mark the client's send side as closed. */
+  /** Internal: mark the client's send side as closed (half-close). */
   closeSend(): void {
-    this.sendClosed = true;
+    this.inbound.close();
   }
 
   /** Receive the next request message; null on client half-close. */
   async recv(): Promise<Uint8Array | null> {
-    if (this.inbound.length > 0) {
-      return this.inbound.shift()!;
-    }
-    if (this.sendClosed) {
-      return null;
-    }
-    return new Promise((resolve) => {
-      const poll = () => {
-        if (this.inbound.length > 0) {
-          resolve(this.inbound.shift()!);
-        } else if (this.sendClosed) {
-          resolve(null);
-        } else {
-          setTimeout(poll, 1);
-        }
-      };
-      poll();
-    });
+    return this.inbound.recv();
   }
 
   /** Send one response message. The first send auto-emits a Begin. */
@@ -259,7 +242,15 @@ export class Server {
       }
     });
 
-    ch.onClose(() => resolveClosed!());
+    ch.onClose(() => {
+      // Wake any handler blocked in recv() so it can observe the
+      // closed channel and return; otherwise its promise + timer leak.
+      for (const stream of streams.values()) {
+        stream.closeSend();
+      }
+      streams.clear();
+      resolveClosed!();
+    });
     await closed;
   }
 

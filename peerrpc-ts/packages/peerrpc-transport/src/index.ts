@@ -165,6 +165,7 @@ export class Channel {
     }
     const end = offset + data.length;
     if (end > state.buf.length) {
+      console.warn("transport: chunk overflow, dropping data for seq", seq);
       return null;
     }
     state.buf.set(data, offset);
