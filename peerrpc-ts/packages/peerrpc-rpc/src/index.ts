@@ -16,7 +16,7 @@ import {
   CHUNK_SIZE,
   ResponseFrame,
 } from "@peerrpc/protocol";
-import { Frame, Call, End, Data, Chunk, Routing } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
+import { Frame, Call, End, Data, Chunk, Routing, Strings, Metadata as MetadataMsg } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
 import type { Channel } from "@peerrpc/transport";
 import { AsyncQueue } from "./queue.js";
 
@@ -98,11 +98,11 @@ export class Client {
       protocolVersion: 1,
     });
     if (metadata) {
-      const md: Record<string, { values: string[] }> = {};
+      const md: Record<string, Strings> = {};
       for (const [k, vs] of Object.entries(metadata)) {
-        md[k] = { values: vs };
+        md[k] = new Strings({ values: vs });
       }
-      call.metadata = { md };
+      call.metadata = new MetadataMsg({ md });
     }
     if (req.length <= INLINE_MAX) {
       call.inlineData = req;
@@ -142,11 +142,11 @@ export class Client {
 
     const call = new Call({ method, protocolVersion: 1 });
     if (metadata) {
-      const md: Record<string, { values: string[] }> = {};
+      const md: Record<string, Strings> = {};
       for (const [k, vs] of Object.entries(metadata)) {
-        md[k] = { values: vs };
+        md[k] = new Strings({ values: vs });
       }
-      call.metadata = { md };
+      call.metadata = new MetadataMsg({ md });
     }
     if (req.length <= INLINE_MAX) {
       call.inlineData = req;
@@ -184,11 +184,11 @@ export class Client {
     const stream = this.openStream();
     const call = new Call({ method, protocolVersion: 1 });
     if (metadata) {
-      const md: Record<string, { values: string[] }> = {};
+      const md: Record<string, Strings> = {};
       for (const [k, vs] of Object.entries(metadata)) {
-        md[k] = { values: vs };
+        md[k] = new Strings({ values: vs });
       }
-      call.metadata = { md };
+      call.metadata = new MetadataMsg({ md });
     }
     if (firstReq && firstReq.length <= INLINE_MAX) {
       call.inlineData = firstReq;
@@ -251,7 +251,7 @@ export class Client {
     }
     for (let off = 0; off < payload.length; off += CHUNK_SIZE) {
       const end = Math.min(off + CHUNK_SIZE, payload.length);
-      const chunk = payload.subarray(off, end);
+      const chunk = new Uint8Array(payload.subarray(off, end));
       await this.ch.send(new Frame({
         routing: new Routing({ sequence: seq }),
         type: {
@@ -403,7 +403,7 @@ export class ClientStream {
               value: new Chunk({
                 totalSize: payload.length,
                 offset: off,
-                data: payload.subarray(off, end),
+                data: new Uint8Array(payload.subarray(off, end)),
               }),
             },
           }),

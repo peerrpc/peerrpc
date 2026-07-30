@@ -47,7 +47,9 @@ describe("encodeFrame / tryDecodeFrame round-trip", () => {
     expect(result).not.toBeNull();
     expect(result!.consumed).toBe(encoded.length);
     expect(result!.frame.type.case).toBe("call");
-    expect(result!.frame.type.value!.method).toBe("/echo.Echo/Echo");
+    if (result!.frame.type.case === "call") {
+      expect(result!.frame.type.value!.method).toBe("/echo.Echo/Echo");
+    }
   });
 
   it("returns null for partial buffer", () => {
@@ -101,7 +103,9 @@ describe("encodeResponseFrame / tryDecodeResponseFrame", () => {
     const result = tryDecodeResponseFrame(encoded);
     expect(result).not.toBeNull();
     expect(result!.frame.type.case).toBe("end");
-    expect(result!.frame.type.value!.status!.code).toBe(0);
+    if (result!.frame.type.case === "end") {
+      expect(result!.frame.type.value!.status!.code).toBe(0);
+    }
   });
 
   it("round-trips a Begin frame with header", () => {
@@ -118,6 +122,8 @@ describe("encodeResponseFrame / tryDecodeResponseFrame", () => {
     const result = tryDecodeResponseFrame(encoded);
     expect(result).not.toBeNull();
     expect(result!.frame.type.case).toBe("begin");
-    expect(result!.frame.type.value!.header!.md["x-trace"]!.values[0]).toBe("abc123");
+    if (result!.frame.type.case === "begin") {
+      expect(result!.frame.type.value!.header!.md["x-trace"]!.values[0]).toBe("abc123");
+    }
   });
 });

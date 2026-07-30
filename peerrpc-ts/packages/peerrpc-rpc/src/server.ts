@@ -108,7 +108,7 @@ export class ServerStream {
               value: new Chunk({
                 totalSize: payload.length,
                 offset: off,
-                data: payload.subarray(off, end),
+                data: new Uint8Array(payload.subarray(off, end)),
               }),
             },
           }),
@@ -196,7 +196,11 @@ export class Server {
     // default "response" mode would misparse every Call as a Begin.
     ch.setDecodeMode("request");
 
-    ch.onFrame((frame: Frame) => {
+    ch.onFrame((frame) => {
+      // The server only handles client->server Frames; ignore any
+      // server->client ResponseFrame that could leak back through the
+      // transport (e.g. in a loopback/bridge setup).
+      if (!(frame instanceof Frame)) return;
       const seq = frame.routing?.sequence ?? 0;
 
       switch (frame.type.case) {

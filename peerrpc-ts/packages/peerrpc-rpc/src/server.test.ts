@@ -10,19 +10,22 @@ import {
 } from "../src/main.js";
 import type { Channel } from "@peerrpc/transport";
 import { Frame, Call, End, Routing, Data } from "@peerrpc/protocol/gen/peerrpc/peerrpc_pb.js";
+import { ResponseFrame } from "@peerrpc/protocol";
 
 /** In-memory Channel implementation for tests. Mirrors the shape
  * the real WebRTC-backed Channel exposes; enough to drive Server
- * through one full RPC. */
-class FakeChannel implements Channel {
-  private frameCb: ((f: Frame) => void) | null = null;
+ * through one full RPC. Structurally compatible with Channel but
+ * declared without `implements` (Channel carries private RTCDataChannel
+ * state that a fake has no need for). */
+class FakeChannel {
+  private frameCb: ((f: Frame | ResponseFrame) => void) | null = null;
   private closeCb: (() => void) | null = null;
-  public sent: Frame[] = [];
+  public sent: (Frame | ResponseFrame)[] = [];
   private chunks: Map<number, { total: number; got: number; buf: Map<number, Uint8Array> }> = new Map();
 
-  onFrame(cb: (f: Frame) => void): void { this.frameCb = cb; }
+  onFrame(cb: (f: Frame | ResponseFrame) => void): void { this.frameCb = cb; }
   onClose(cb: () => void): void { this.closeCb = cb; }
-  async send(f: Frame): Promise<void> { this.sent.push(f); }
+  async send(f: Frame | ResponseFrame): Promise<void> { this.sent.push(f); }
   // FakeChannel pushes already-decoded Frame objects, so the decode
   // mode is a no-op here. Implemented to satisfy the Channel interface
   // now that Server.serve calls setDecodeMode("request").
@@ -61,7 +64,7 @@ describe("Server", () => {
     });
 
     const ch = new FakeChannel();
-    const servePromise = srv.serve(ch);
+    const servePromise = srv.serve(ch as unknown as Channel);
 
     // Push a Call + End.
     ch.push(new Frame({
@@ -79,14 +82,14 @@ describe("Server", () => {
     // Wait for the server to send Begin + End.
     await waitUntil(() => ch.sent.length >= 2);
 
-    // Begin carries the inline response.
-    const begin = ch.sent[0];
+    // Begin carries the inline response (server emits ResponseFrames).
+    const begin = ch.sent[0] as ResponseFrame;
     expect(begin.type.case).toBe("begin");
     if (begin.type.case === "begin") {
       expect(new TextDecoder().decode(begin.type.value!.inlineData!)).toBe("hi echo");
     }
     // End carries status OK.
-    const end = ch.sent[1];
+    const end = ch.sent[1] as ResponseFrame;
     expect(end.type.case).toBe("end");
     if (end.type.case === "end") {
       expect(end.type.value!.status?.code).toBe(0);
@@ -99,7 +102,7 @@ describe("Server", () => {
   it("returns UNIMPLEMENTED for unknown methods", async () => {
     const srv = new Server();
     const ch = new FakeChannel();
-    const p = srv.serve(ch);
+    const p = srv.serve(ch as unknown as Channel);
     ch.push(new Frame({
       routing: new Routing({ sequence: 1 }),
       type: {
@@ -130,7 +133,7 @@ describe("Server", () => {
 
     // Internal: handlers map is private; verify behaviorally.
     const ch1 = new FakeChannel();
-    const p1 = srv.serve(ch1);
+    const p1 = srv.serve(ch1 as unknown as Channel);
     ch1.push(new Frame({
       routing: new Routing({ sequence: 1 }),
       type: { case: "call", value: new Call({ method: "/echo.Echo/Unary" }) },
@@ -141,7 +144,7 @@ describe("Server", () => {
     await p1;
 
     const ch2 = new FakeChannel();
-    const p2 = srv.serve(ch2);
+    const p2 = srv.serve(ch2 as unknown as Channel);
     ch2.push(new Frame({
       routing: new Routing({ sequence: 1 }),
       type: { case: "call", value: new Call({ method: "/echo.Echo/Stream" }) },

@@ -119,7 +119,7 @@ export class Channel {
    * Send raw pre-marshaled bytes (used by the relay for transparent
    * forwarding).
    */
-  async sendRaw(payload: Uint8Array): Promise<void> {
+  async sendRaw(payload: Uint8Array<ArrayBuffer>): Promise<void> {
     if (this.closed) {
       throw new Error("transport: channel closed");
     }

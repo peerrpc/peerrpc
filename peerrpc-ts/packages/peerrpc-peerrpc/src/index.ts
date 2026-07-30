@@ -54,8 +54,12 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
   }
   const peerId = target.peerId;
   switch (target.scheme) {
-    case "local":
-      return localBus.join(target.service, peerId);
+    case "local": {
+      // localBus.join returns { transport, leave }; remap leave -> close to
+      // satisfy this function's { transport, close } contract.
+      const joined = localBus.join(target.service, peerId);
+      return { transport: joined.transport, close: () => joined.leave() };
+    }
     case "connect": {
       const sig = new ConnectSignal({
         url: target.signal.startsWith("http") ? target.signal : `https://${target.signal}`,

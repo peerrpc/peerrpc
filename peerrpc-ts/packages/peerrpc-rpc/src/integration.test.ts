@@ -9,6 +9,7 @@ import { describe, it, expect } from "vitest";
 import { Server, ok, MethodKind, type ServiceDesc } from "../src/main.js";
 import { Client, Code } from "../src/index.js";
 import type { Frame, ResponseFrame } from "@peerrpc/protocol";
+import type { Channel } from "@peerrpc/transport";
 
 // ─── BridgeChannel ───────────────────────────────────────────
 
@@ -108,7 +109,7 @@ function registerEcho(srv: Server): void {
 }
 
 function startServer(srv: Server, serverCh: BridgeChannel): void {
-  srv.serve(serverCh).catch(() => { /* best-effort */ });
+  srv.serve(serverCh as unknown as Channel).catch(() => { /* best-effort */ });
 }
 
 const dec = new TextDecoder();

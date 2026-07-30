@@ -35,7 +35,7 @@ export const DATACHANNEL_LABEL = "peerrpc-v1";
  * Write a length-prefixed Frame to a DataView-friendly sink.
  * Returns the raw bytes to send through the DataChannel.
  */
-export function encodeFrame(frame: Frame): Uint8Array {
+export function encodeFrame(frame: Frame): Uint8Array<ArrayBuffer> {
   const payload = frame.toBinary();
   return lengthPrefix(payload);
 }
@@ -43,7 +43,7 @@ export function encodeFrame(frame: Frame): Uint8Array {
 /**
  * Write a length-prefixed ResponseFrame.
  */
-export function encodeResponseFrame(frame: ResponseFrame): Uint8Array {
+export function encodeResponseFrame(frame: ResponseFrame): Uint8Array<ArrayBuffer> {
   const payload = frame.toBinary();
   return lengthPrefix(payload);
 }
@@ -51,7 +51,7 @@ export function encodeResponseFrame(frame: ResponseFrame): Uint8Array {
 /**
  * Prepend a 4-byte big-endian length header to payload.
  */
-export function lengthPrefix(payload: Uint8Array): Uint8Array {
+export function lengthPrefix(payload: Uint8Array): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(4 + payload.length);
   const view = new DataView(out.buffer);
   view.setUint32(0, payload.length, false); // big-endian
