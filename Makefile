@@ -11,7 +11,7 @@ CARGO ?= cargo
 .PHONY: run-signal run-echo run-echo-server run-echo-server-ts run-echo-ts run-echo-react
 
 # Local (single-process, no signal-server) demos.
-.PHONY: run-local-echo-go run-local-echo-rs run-local-facade-go run-local-facade-ts run-local-facade-rs run-local-facades
+.PHONY: run-local-echo-go run-local-echo-rs run-local-facade-go run-local-facade-rs run-local-facades
 
 # Cross-language interop samples (test/cross-lang/).
 .PHONY: run-interop-server run-interop-rs run-interop-e2e
@@ -135,16 +135,12 @@ run-local-echo-rs:
 run-local-facade-go:
 	cd examples/go/facade && $(GO) run .
 
-run-local-facade-ts: build-ts
-	cd examples/ts/facade && $(NPM) install && $(NPM) run dev
-
 run-local-facade-rs: build-rs
 	$(CARGO) run --manifest-path examples/rs/facade/Cargo.toml
 
 run-local-facades:
 	@echo "Run each facade in a separate terminal:"
 	@echo "  make run-local-facade-go"
-	@echo "  make run-local-facade-ts"
 	@echo "  make run-local-facade-rs"
 
 # ── Cross-language interop samples ──────────────────────────────
