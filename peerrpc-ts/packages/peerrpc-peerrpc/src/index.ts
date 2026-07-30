@@ -47,7 +47,12 @@ function randomPeerId(): string {
 // ----- resolver: Target → SignalTransport -----
 
 function buildSignalTransport(target: Target): { transport: SignalTransport; close: () => void } {
-  const peerId = target.peerId ?? randomPeerId();
+  // Backfill a generated peer_id onto the target so callers (dial)
+  // can report it even when the target URI omitted ?peer=.
+  if (!target.peerId) {
+    target.peerId = randomPeerId();
+  }
+  const peerId = target.peerId;
   switch (target.scheme) {
     case "local":
       return localBus.join(target.service, peerId);
