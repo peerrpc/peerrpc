@@ -49,18 +49,19 @@ build-rs:
 # ── Quick start: signal-server + echo server + browser client ───
 #
 # Run each in a separate terminal:
-#   make run-signal       # starts the signal-server with auto-TLS
-#   make run-echo-server  # starts the Go echo RPC server (all 4 types)
-#   make run-ts-echo      # starts the Vite dev server for the echo page
+#   make run-signal       # signal-server (cleartext h2c; no TLS setup)
+#   make run-echo-server  # Go echo RPC server (all 4 types)
+#   make run-ts-echo      # Vite dev server for the browser echo page
 #
-# Then open the printed Vite URL, accept the self-signed cert warning
-# for https://localhost:8443, and click "Connect".
+# Then open the printed Vite URL and click "Connect". For a TLS setup
+# (wss://) pass SIGNAL_TLS=1 and accept the self-signed cert first.
 
 SIGNAL_ADDR ?= :8443
+SIGNAL_TLS  ?= 0
 ECHO_PORT   ?= 5173
 
 run-signal:
-	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) --auto-tls
+	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) $(if $(filter 1,$(SIGNAL_TLS)),--auto-tls)
 
 run-echo-server:
 	cd examples/go/echo-server && $(GO) run .
@@ -78,9 +79,8 @@ run-echo:
 	@echo "  make run-echo-server   (Go)  or  make run-ts-echo-server  (browser)"
 	@echo "  make run-ts-echo"
 	@echo ""
-	@echo "Then open the Vite URL, accept the cert warning at"
-	@echo "  https://localhost:8443"
-	@echo "and click Connect."
+	@echo "Then open the Vite URL and click Connect. No TLS setup needed"
+	@echo "(cleartext by default; use SIGNAL_TLS=1 for wss://)."
 
 # ── Per-language echo demos (local signaling, no server needed) ───
 

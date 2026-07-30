@@ -64,8 +64,18 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
       };
     }
     case "ws": {
+      // Default to cleartext ws:// for loopback hosts (dev convenience:
+      // avoids the self-signed cert dance) and wss:// elsewhere. Callers
+      // can force either by passing a full ws://host or wss://host in
+      // the target authority.
+      const wsScheme = target.signal.startsWith("ws")
+        ? ""
+        : isLoopbackAuthority(target.signal) ? "ws://" : "wss://";
+      const url = target.signal.startsWith("ws")
+        ? (target.signal.endsWith("/ws") ? target.signal : `${target.signal}/ws`)
+        : `${wsScheme}${target.signal}/ws`;
       const sig = new WebSocketSignal({
-        url: target.signal.startsWith("ws") ? target.signal : `wss://${target.signal}/ws`,
+        url,
         service: target.service,
         peerId,
       });
@@ -229,4 +239,11 @@ async function maybeConnectSignal(transport: SignalTransport): Promise<void> {
 function shortId(): string {
   const id = randomPeerId();
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+// isLoopbackAuthority returns true for localhost / 127.0.0.1 / ::1
+// authorities, used to pick ws:// (cleartext) over wss:// for local dev.
+function isLoopbackAuthority(authority: string): boolean {
+  const host = authority.split(":")[0];
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
 }
