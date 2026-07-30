@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot, Notify};
 use tonic::Request;
 
 #[allow(dead_code)]
@@ -81,35 +81,72 @@ impl Remote {
             .send(announce)
             .map_err(|_| SignalError::Closed)?;
 
-        // Spawn the bidi stream pump.
+        // Spawn the bidi stream pump. A oneshot surfaces the connection
+        // result back to exchange() so a dial failure is not silently
+        // swallowed (previously the session looked healthy but never
+        // delivered messages).
         let svc = service.to_string();
         let peer = peer_id.to_string();
+        let (connect_tx, connect_rx) = oneshot::channel::<Result<(), String>>();
+        let done = Arc::new(Notify::new());
+        let done_for_stream = done.clone();
+        let done_for_inbound = done.clone();
+        let done_for_outbound = done.clone();
         tokio::spawn(async move {
             let stream = outbound_to_stream(outbound_rx);
-            let exchange_result = client.exchange(Request::new(stream)).await;
-            if let Ok(resp) = exchange_result {
-                let mut stream = resp.into_inner();
-                loop {
-                    match stream.message().await {
-                        Ok(Some(msg)) => {
-                            if inbound_tx.send(msg).is_err() {
-                                break;
+            match client.exchange(Request::new(stream)).await {
+                Ok(resp) => {
+                    let _ = connect_tx.send(Ok(()));
+                    let mut stream = resp.into_inner();
+                    loop {
+                        tokio::select! {
+                            biased;
+                            _ = done_for_stream.notified() => break,
+                            msg = stream.message() => {
+                                match msg {
+                                    Ok(Some(m)) => {
+                                        if inbound_tx.send(m).is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Ok(None) => break,
+                                    Err(e) => {
+                                        tracing::warn!("signal: exchange stream error: {e}");
+                                        break;
+                                    }
+                                }
                             }
                         }
-                        Ok(None) => break,
-                        Err(_) => break,
                     }
+                }
+                Err(e) => {
+                    let _ = connect_tx.send(Err(format!("signal: connect failed: {e}")));
                 }
             }
         });
 
+        // Wait for the connection to be established (or fail) before
+        // returning the session, so callers learn of dial failures.
+        match connect_rx.await {
+            Ok(Ok(())) => {}
+            Ok(Err(msg)) => return Err(SignalError::Other(msg)),
+            Err(_) => return Err(SignalError::Other("signal: connect task dropped".into())),
+        }
+
         // Bridge: convert wire ↔ public SignalMessage types.
         let (pub_inbound_tx, pub_inbound_rx) = mpsc::unbounded_channel::<SignalMessage>();
         tokio::spawn(async move {
-            while let Some(wire) = inbound_rx_from_stream.recv().await {
-                let translated = translate_in(&wire);
-                if pub_inbound_tx.send(translated).is_err() {
-                    break;
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = done_for_inbound.notified() => break,
+                    wire = inbound_rx_from_stream.recv() => {
+                        let Some(wire) = wire else { break };
+                        let translated = translate_in(&wire);
+                        if pub_inbound_tx.send(translated).is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -117,15 +154,21 @@ impl Remote {
         let (pub_outbound_tx, mut pub_outbound_rx) = mpsc::unbounded_channel::<SignalMessage>();
         let svc_for_bridge = svc.clone();
         tokio::spawn(async move {
-            while let Some(msg) = pub_outbound_rx.recv().await {
-                let wire = translate_out(&msg, &svc_for_bridge);
-                if outbound_tx.send(wire).is_err() {
-                    break;
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = done_for_outbound.notified() => break,
+                    msg = pub_outbound_rx.recv() => {
+                        let Some(msg) = msg else { break };
+                        let wire = translate_out(&msg, &svc_for_bridge);
+                        if outbound_tx.send(wire).is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
 
-        let done = Arc::new(tokio::sync::Notify::new());
         Ok(Session {
             service: svc,
             peer_id: peer,
