@@ -112,6 +112,41 @@ fn echo_server() -> Server {
                     })
                 }),
             },
+            // LargeEcho: verbatim echo of an arbitrarily large payload,
+            // exercising inbound chunk reassembly + outbound chunking.
+            MethodDesc {
+                method: "LargeEcho".to_string(),
+                kind: MethodKind::Unary,
+                handler: Arc::new(|s: ServerStream| {
+                    Box::pin(async move {
+                        match s.recv().await {
+                            Some(req) => match s.send(req).await {
+                                Ok(()) => Status::ok(),
+                                Err(e) => Status { code: 13, message: e },
+                            },
+                            None => Status::ok(),
+                        }
+                    })
+                }),
+            },
+            // LargeEchoStream: bidi verbatim echo, one response per request.
+            MethodDesc {
+                method: "LargeEchoStream".to_string(),
+                kind: MethodKind::BidiStreaming,
+                handler: Arc::new(|s: ServerStream| {
+                    Box::pin(async move {
+                        loop {
+                            match s.recv().await {
+                                Some(msg) => match s.send(msg).await {
+                                    Ok(()) => {}
+                                    Err(e) => return Status { code: 13, message: e },
+                                },
+                                None => return Status::ok(),
+                            }
+                        }
+                    })
+                }),
+            },
         ],
     });
     srv
@@ -293,4 +328,56 @@ async fn test_bridge_client_disconnect_cleans_up() {
         .await
         .expect("server serve loop did not exit after client disconnect")
         .expect("serve task panicked");
+}
+
+#[tokio::test]
+async fn test_bridge_large_unary_echo() {
+    // 1 MiB unary call: the client chunks it on the outbound (4×255 KiB
+    // Data.chunk frames), the server reassembles, the handler echoes it
+    // back, the client reassembles the response. Verifies the full
+    // large-payload round trip stays under the SCTP max-message-size.
+    let srv = Arc::new(echo_server());
+    let (client_t, server_t) = bridge();
+    spawn_server(srv, server_t);
+    let client = Client::new(client_t);
+
+    let size = 1024 * 1024;
+    let payload: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+
+    let (resp, status) = client
+        .invoke_unary("/echo.Echo/LargeEcho", &payload)
+        .await
+        .expect("invoke_unary");
+    assert!(status.is_ok(), "status: {status:?}");
+    assert_eq!(resp.len(), size, "echo length mismatch");
+    assert_eq!(resp, payload, "echo integrity mismatch");
+}
+
+#[tokio::test]
+async fn test_bridge_large_bidi_echo() {
+    // LargeEchoStream: send a 1 MiB message, expect a 1 MiB echo back,
+    // then half-close. Mirrors the echo-ts LargeEchoStream harness.
+    let srv = Arc::new(echo_server());
+    let (client_t, server_t) = bridge();
+    spawn_server(srv, server_t);
+    let client = Client::new(client_t);
+
+    let size = 1024 * 1024;
+    let payload: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+
+    let mut stream = client
+        .invoke_bidi_streaming("/echo.Echo/LargeEchoStream")
+        .await
+        .expect("invoke_bidi_streaming");
+    stream.send(&payload).expect("send");
+
+    let echo = stream.recv().await.expect("missing echo");
+    assert_eq!(echo.len(), size, "echo length mismatch");
+    assert_eq!(echo, payload, "echo integrity mismatch");
+
+    stream.close_send().unwrap();
+    // Server returns OK after EOF.
+    assert!(stream.recv().await.is_none());
+    let status = stream.wait_end().await;
+    assert!(status.is_ok(), "status: {status:?}");
 }
