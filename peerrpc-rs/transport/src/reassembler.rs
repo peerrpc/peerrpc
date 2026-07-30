@@ -16,7 +16,9 @@ pub struct Reassembler {
 
 impl Reassembler {
     pub fn new() -> Self {
-        Self { chunks: HashMap::new() }
+        Self {
+            chunks: HashMap::new(),
+        }
     }
 
     /// Fold one chunk into the per-sequence buffer. Returns the
@@ -35,7 +37,11 @@ impl Reassembler {
         });
 
         if entry.total != total {
-            *entry = Assembler { buf: vec![0; total], got: 0, total };
+            *entry = Assembler {
+                buf: vec![0; total],
+                got: 0,
+                total,
+            };
         }
 
         let end = offset + data.len();
@@ -54,7 +60,9 @@ impl Reassembler {
 }
 
 impl Default for Reassembler {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]

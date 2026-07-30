@@ -4,16 +4,14 @@
 //! and response dispatch work correctly without a real WebRTC
 //! connection.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use peerrpc_protocol::{
-    encode_response_frame, gen, Begin, Data, End, ResponseFrame, Routing,
-};
 use peerrpc_protocol::google::rpc::Status as WireStatus;
-use peerrpc_rpc::{Client, WireTransport, RpcError};
+use peerrpc_protocol::{encode_response_frame, gen, Begin, Data, End, ResponseFrame, Routing};
+use peerrpc_rpc::{Client, RpcError, WireTransport};
 use tokio::sync::Mutex;
 
 /// MockTransport holds an inbound queue of pre-built response frames
@@ -53,7 +51,11 @@ fn make_unary_response(seq: i32, data: &[u8]) -> Vec<Bytes> {
         encode_response_frame(&ResponseFrame {
             routing: Some(Routing { sequence: seq }),
             r#type: Some(gen::response_frame::Type::End(End {
-                status: Some(WireStatus { code: 0, message: "".into(), details: vec![] }),
+                status: Some(WireStatus {
+                    code: 0,
+                    message: "".into(),
+                    details: vec![],
+                }),
                 ..Default::default()
             })),
         }),
@@ -63,12 +65,10 @@ fn make_unary_response(seq: i32, data: &[u8]) -> Vec<Bytes> {
 /// Helper: build a ResponseFrame sequence for client streaming:
 /// Begin → Data × N → End.
 fn make_client_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
-    let mut frames = vec![
-        encode_response_frame(&ResponseFrame {
-            routing: Some(Routing { sequence: seq }),
-            r#type: Some(gen::response_frame::Type::Begin(Begin::default())),
-        }),
-    ];
+    let mut frames = vec![encode_response_frame(&ResponseFrame {
+        routing: Some(Routing { sequence: seq }),
+        r#type: Some(gen::response_frame::Type::Begin(Begin::default())),
+    })];
     for chunk in chunks {
         frames.push(encode_response_frame(&ResponseFrame {
             routing: Some(Routing { sequence: seq }),
@@ -80,7 +80,11 @@ fn make_client_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
     frames.push(encode_response_frame(&ResponseFrame {
         routing: Some(Routing { sequence: seq }),
         r#type: Some(gen::response_frame::Type::End(End {
-            status: Some(WireStatus { code: 0, message: "".into(), details: vec![] }),
+            status: Some(WireStatus {
+                code: 0,
+                message: "".into(),
+                details: vec![],
+            }),
             ..Default::default()
         })),
     }));
@@ -88,12 +92,10 @@ fn make_client_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
 }
 
 fn make_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
-    let mut frames = vec![
-        encode_response_frame(&ResponseFrame {
-            routing: Some(Routing { sequence: seq }),
-            r#type: Some(gen::response_frame::Type::Begin(Begin::default())),
-        }),
-    ];
+    let mut frames = vec![encode_response_frame(&ResponseFrame {
+        routing: Some(Routing { sequence: seq }),
+        r#type: Some(gen::response_frame::Type::Begin(Begin::default())),
+    })];
     for chunk in chunks {
         frames.push(encode_response_frame(&ResponseFrame {
             routing: Some(Routing { sequence: seq }),
@@ -105,7 +107,11 @@ fn make_streaming_response(seq: i32, chunks: &[Vec<u8>]) -> Vec<Bytes> {
     frames.push(encode_response_frame(&ResponseFrame {
         routing: Some(Routing { sequence: seq }),
         r#type: Some(gen::response_frame::Type::End(End {
-            status: Some(WireStatus { code: 0, message: "".into(), details: vec![] }),
+            status: Some(WireStatus {
+                code: 0,
+                message: "".into(),
+                details: vec![],
+            }),
             ..Default::default()
         })),
     }));
@@ -259,10 +265,7 @@ async fn test_large_payload_chunking() {
 
     // Send a 1 MB payload (forces chunking on the outbound).
     let big_req = vec![0xAA; 1024 * 1024];
-    let (resp, status) = client
-        .invoke_unary("/test/Big", &big_req)
-        .await
-        .unwrap();
+    let (resp, status) = client.invoke_unary("/test/Big", &big_req).await.unwrap();
     assert_eq!(resp, b"big-response");
     assert!(status.is_ok());
     // Sent: Call + N chunks + End. At least 3 frames.

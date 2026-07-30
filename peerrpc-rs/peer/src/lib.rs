@@ -3,15 +3,15 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bytes::Bytes;
 use peerrpc_rpc::WireTransport;
-use peerrpc_signal::{Session, SignalBody, SdpOffer, SdpAnswer, SignalMessage};
+use peerrpc_signal::{SdpAnswer, SdpOffer, Session, SignalBody, SignalMessage};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_gathering_state::RTCIceGatheringState;
-use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::peer_connection::RTCPeerConnection;
 
 pub use webrtc::peer_connection::configuration::RTCConfiguration as PeerConfig;
 
@@ -91,8 +91,7 @@ impl Peer {
         let pc = Arc::new(api.new_peer_connection(cfg).await?);
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
-        let dc_handle: Arc<Mutex<Option<Arc<RTCDataChannel>>>> =
-            Arc::new(Mutex::new(None));
+        let dc_handle: Arc<Mutex<Option<Arc<RTCDataChannel>>>> = Arc::new(Mutex::new(None));
         let dc_notify = Arc::new(Notify::new());
         let open_notify = Arc::new(Notify::new());
 
@@ -147,7 +146,10 @@ impl Peer {
         Ok((peer, sdp))
     }
 
-    pub async fn wait_for_data_channel(&self, timeout: Duration) -> Result<Arc<RTCDataChannel>, PeerError> {
+    pub async fn wait_for_data_channel(
+        &self,
+        timeout: Duration,
+    ) -> Result<Arc<RTCDataChannel>, PeerError> {
         tokio::time::timeout(timeout, self.dc_notify.notified())
             .await
             .map_err(|_| PeerError::Timeout("DataChannel open".into()))?;
@@ -221,7 +223,11 @@ impl Peer {
                     break msg.body.offer.unwrap().sdp;
                 }
                 Some(_) => continue,
-                None => return Err(PeerError::Other("signal session closed before offer".into())),
+                None => {
+                    return Err(PeerError::Other(
+                        "signal session closed before offer".into(),
+                    ))
+                }
             }
         };
 
@@ -291,9 +297,5 @@ async fn wait_ice_complete(pc: &Arc<RTCPeerConnection>) {
         return;
     }
 
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        notify.notified(),
-    )
-    .await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), notify.notified()).await;
 }

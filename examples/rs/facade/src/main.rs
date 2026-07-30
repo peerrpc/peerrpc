@@ -24,14 +24,22 @@ fn unary_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Syn
             // checker fights).
             let req = match s.recv().await {
                 Some(b) => b,
-                None => return Status { code: 13, message: "empty request".into() },
+                None => {
+                    return Status {
+                        code: 13,
+                        message: "empty request".into(),
+                    }
+                }
             };
             let mut resp = Vec::with_capacity(6 + req.len());
             resp.extend_from_slice(b"echo: ");
             resp.extend_from_slice(&req);
             match s.send(resp).await {
                 Ok(()) => Status::ok(),
-                Err(e) => Status { code: 13, message: e },
+                Err(e) => Status {
+                    code: 13,
+                    message: e,
+                },
             }
         })
     })

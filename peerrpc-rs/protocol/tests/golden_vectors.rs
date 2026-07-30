@@ -14,13 +14,12 @@
 //! byte-level determinism within each language; the cross-language
 //! test covers decode compatibility.
 
-use prost::Message;
 use peerrpc_protocol::{Frame, ResponseFrame};
+use prost::Message;
 
 #[test]
 fn golden_vectors_decode() {
-    let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/vectors");
+    let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/vectors");
 
     if !vectors_dir.exists() {
         eprintln!("golden vectors directory not found; skipping");
@@ -41,26 +40,35 @@ fn golden_vectors_decode() {
         if is_response {
             let frame = ResponseFrame::decode(&raw[..])
                 .unwrap_or_else(|e| panic!("decode {} failed: {}", name, e));
-            assert!(frame.routing.is_some() || frame.r#type.is_some(),
-                "empty frame: {}", name);
+            assert!(
+                frame.routing.is_some() || frame.r#type.is_some(),
+                "empty frame: {}",
+                name
+            );
         } else {
-            let frame = Frame::decode(&raw[..])
-                .unwrap_or_else(|e| panic!("decode {} failed: {}", name, e));
-            assert!(frame.routing.is_some() || frame.r#type.is_some(),
-                "empty frame: {}", name);
+            let frame =
+                Frame::decode(&raw[..]).unwrap_or_else(|e| panic!("decode {} failed: {}", name, e));
+            assert!(
+                frame.routing.is_some() || frame.r#type.is_some(),
+                "empty frame: {}",
+                name
+            );
         }
         tested += 1;
     }
 
-    assert!(tested >= 10, "expected >= 10 golden vectors, got {}", tested);
+    assert!(
+        tested >= 10,
+        "expected >= 10 golden vectors, got {}",
+        tested
+    );
 }
 
 /// For vectors without map fields (the majority), re-encoding
 /// DOES produce byte-identical output. This test covers those.
 #[test]
 fn golden_vectors_roundtrip_no_maps() {
-    let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/vectors");
+    let vectors_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/vectors");
 
     if !vectors_dir.exists() {
         return;

@@ -21,7 +21,7 @@ use gen::{
     signaling_service_client::SignalingServiceClient, AnnounceRequest, SignalMessage as WireMsg,
 };
 
-use crate::{IceCandidate, SdpAnswer, SignalBody, SdpOffer, Session, SignalError, SignalMessage};
+use crate::{IceCandidate, SdpAnswer, SdpOffer, Session, SignalBody, SignalError, SignalMessage};
 
 /// Remote speaks the signaling wire format over HTTP/2 (via tonic).
 pub struct Remote {
@@ -40,11 +40,7 @@ impl Remote {
 
     /// Open a bidi Exchange stream against (service, peer_id) and
     /// return a Session that ferries SignalMessages both ways.
-    pub async fn exchange(
-        &self,
-        service: &str,
-        peer_id: &str,
-    ) -> Result<Session, SignalError> {
+    pub async fn exchange(&self, service: &str, peer_id: &str) -> Result<Session, SignalError> {
         if service.is_empty() {
             return Err(SignalError::Other("empty service".into()));
         }
@@ -60,8 +56,7 @@ impl Remote {
         // Lazy channel: actual TCP/TLS connect happens on first RPC.
         // Simpler than eagerly awaiting connect(); failure surfaces
         // as a transport error on the first exchange() call.
-        let channel = endpoint
-            .connect_lazy();
+        let channel = endpoint.connect_lazy();
 
         let mut client = SignalingServiceClient::new(channel);
 
@@ -182,12 +177,16 @@ impl Remote {
 
 fn translate_out(msg: &SignalMessage, service: &str) -> WireMsg {
     let body = match &msg.body {
-        SignalBody { offer: Some(o), .. } => Some(gen::signal_message::Body::Offer(
-            gen::SdpOffer { sdp: o.sdp.clone() },
-        )),
-        SignalBody { answer: Some(a), .. } => Some(gen::signal_message::Body::Answer(
-            gen::SdpAnswer { sdp: a.sdp.clone() },
-        )),
+        SignalBody { offer: Some(o), .. } => {
+            Some(gen::signal_message::Body::Offer(gen::SdpOffer {
+                sdp: o.sdp.clone(),
+            }))
+        }
+        SignalBody {
+            answer: Some(a), ..
+        } => Some(gen::signal_message::Body::Answer(gen::SdpAnswer {
+            sdp: a.sdp.clone(),
+        })),
         SignalBody {
             candidate: Some(c), ..
         } => Some(gen::signal_message::Body::Candidate(gen::IceCandidate {

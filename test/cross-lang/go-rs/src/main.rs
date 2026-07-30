@@ -50,11 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Connect to SSE and receive the offer from the Go server.
     tracing::info!("subscribing to SSE signaling...");
-    let offer_sdp = wait_for_sse_offer(&format!(
-        "{}/api/signal/events?room={}",
-        url, room
-    ))
-    .await?;
+    let offer_sdp = wait_for_sse_offer(&format!("{}/api/signal/events?room={}", url, room)).await?;
     tracing::info!("received SDP offer ({} bytes)", offer_sdp.len());
 
     // 2. Create a webrtc-rs PeerConnection as Answerer.
@@ -104,12 +100,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .map_err(|_| -> Box<dyn std::error::Error> { "Unary timeout".into() })??;
 
     if !status.is_ok() {
-        tracing::error!("Unary RPC failed: code={} msg={}", status.code, status.message);
+        tracing::error!(
+            "Unary RPC failed: code={} msg={}",
+            status.code,
+            status.message
+        );
         std::process::exit(1);
     }
     let resp_str = String::from_utf8_lossy(&resp);
     tracing::info!("Unary response: {}", resp_str);
-    assert!(resp_str.starts_with("echo: "), "unexpected response: {}", resp_str);
+    assert!(
+        resp_str.starts_with("echo: "),
+        "unexpected response: {}",
+        resp_str
+    );
     assert!(resp_str.contains("hello from rust"));
 
     // 6. Issue Server Streaming RPC.
@@ -122,11 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut chunks = 0;
     loop {
-        let result = tokio::time::timeout(
-            Duration::from_secs(10),
-            stream.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(10), stream.recv()).await;
         match result {
             Ok(Some(chunk)) => {
                 chunks += 1;
@@ -152,15 +152,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Send additional chunks.
     cstream.send(b"chunk-2").map_err(|e| format!("send: {e}"))?;
     cstream.send(b"chunk-3").map_err(|e| format!("send: {e}"))?;
-    cstream.close_send().map_err(|e| format!("close_send: {e}"))?;
+    cstream
+        .close_send()
+        .map_err(|e| format!("close_send: {e}"))?;
 
-    let resp = tokio::time::timeout(
-        Duration::from_secs(10),
-        cstream.recv(),
-    )
-    .await
-    .map_err(|_| "client-streaming recv timeout")?
-    .ok_or("no response")?;
+    let resp = tokio::time::timeout(Duration::from_secs(10), cstream.recv())
+        .await
+        .map_err(|_| "client-streaming recv timeout")?
+        .ok_or("no response")?;
     let resp_str = String::from_utf8_lossy(&resp);
     tracing::info!("Client Streaming response: {}", resp_str);
     assert!(resp_str.contains("3 messages"), "unexpected: {}", resp_str);
@@ -178,20 +177,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 1..=3 {
         let msg = format!("msg-{}", i);
-        bstream.send(msg.as_bytes()).map_err(|e| format!("bidi send: {e}"))?;
-        let resp = tokio::time::timeout(
-            Duration::from_secs(10),
-            bstream.recv(),
-        )
-        .await
-        .map_err(|_| "bidi recv timeout")?
-        .ok_or("no bidi response")?;
+        bstream
+            .send(msg.as_bytes())
+            .map_err(|e| format!("bidi send: {e}"))?;
+        let resp = tokio::time::timeout(Duration::from_secs(10), bstream.recv())
+            .await
+            .map_err(|_| "bidi recv timeout")?
+            .ok_or("no bidi response")?;
         let resp_str = String::from_utf8_lossy(&resp);
         tracing::info!("  ack {}: {}", i, resp_str);
         assert_eq!(resp_str, format!("ack {}: msg-{}", i, i));
     }
 
-    bstream.close_send().map_err(|e| format!("bidi close_send: {e}"))?;
+    bstream
+        .close_send()
+        .map_err(|e| format!("bidi close_send: {e}"))?;
 
     // After close_send the server returns OK → EOF.
     let after = tokio::time::timeout(Duration::from_secs(5), bstream.recv()).await;
@@ -212,28 +212,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn wait_for_sse_offer(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     // ureq is synchronous; run it on a blocking thread.
     let url = url.to_string();
-    tokio::task::spawn_blocking(move || -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let resp = ureq::get(&url)
-            .timeout(Duration::from_secs(60))
-            .call()?;
-        let reader = resp.into_reader();
-        use std::io::{BufRead, BufReader};
-        let buf = BufReader::new(reader);
-        for line in buf.lines() {
-            let line = line?;
-            if line.starts_with("data: ") {
-                let json = &line[6..];
-                if let Ok(msg) = serde_json::from_str::<SignalMsg>(json) {
-                    if msg.msg_type == "offer" {
-                        return Ok(msg.sdp.unwrap_or_default());
+    tokio::task::spawn_blocking(
+        move || -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            let resp = ureq::get(&url).timeout(Duration::from_secs(60)).call()?;
+            let reader = resp.into_reader();
+            use std::io::{BufRead, BufReader};
+            let buf = BufReader::new(reader);
+            for line in buf.lines() {
+                let line = line?;
+                if line.starts_with("data: ") {
+                    let json = &line[6..];
+                    if let Ok(msg) = serde_json::from_str::<SignalMsg>(json) {
+                        if msg.msg_type == "offer" {
+                            return Ok(msg.sdp.unwrap_or_default());
+                        }
                     }
                 }
             }
-        }
-        Err("SSE stream ended without offer".into())
-    })
+            Err("SSE stream ended without offer".into())
+        },
+    )
     .await?
-    .map_err(|e: Box<dyn std::error::Error + Send + Sync>| -> Box<dyn std::error::Error> {
-        Box::from(e.to_string())
-    })
+    .map_err(
+        |e: Box<dyn std::error::Error + Send + Sync>| -> Box<dyn std::error::Error> {
+            Box::from(e.to_string())
+        },
+    )
 }

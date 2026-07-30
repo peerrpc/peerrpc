@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use peerrpc_peer::{PeerConfig, Peer};
+use peerrpc_peer::{Peer, PeerConfig};
 use peerrpc_rpc::server::{BoxFuture, MethodDesc, MethodKind, Server, ServerStream, ServiceDesc};
 use peerrpc_rpc::{Client, Status};
 use peerrpc_signal::Local;
@@ -99,7 +99,10 @@ fn unary_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Syn
                     let resp = [b"echo: ", &req[..]].concat();
                     match s.send(resp).await {
                         Ok(()) => Status::ok(),
-                        Err(e) => Status { code: 13, message: e },
+                        Err(e) => Status {
+                            code: 13,
+                            message: e,
+                        },
                     }
                 }
                 None => Status::ok(),
@@ -116,7 +119,10 @@ fn stream_handler() -> Arc<dyn Fn(ServerStream) -> BoxFuture<Status> + Send + Sy
             for i in 1..=5 {
                 let msg = format!("chunk {i} for {req_str:?}");
                 if let Err(e) = s.send(msg.into_bytes()).await {
-                    return Status { code: 13, message: e };
+                    return Status {
+                        code: 13,
+                        message: e,
+                    };
                 }
             }
             Status::ok()

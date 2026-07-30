@@ -16,8 +16,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::FutureExt;
 use peerrpc_protocol::{
-    try_decode_frame, try_decode_response_frame, DecodeError,
-    Frame, ResponseFrame, BUFFERED_AMOUNT_HIGH, MAX_FRAME_SIZE,
+    try_decode_frame, try_decode_response_frame, DecodeError, Frame, ResponseFrame,
+    BUFFERED_AMOUNT_HIGH, MAX_FRAME_SIZE,
 };
 use prost::Message;
 use tokio::sync::{mpsc, Mutex, Notify};

@@ -33,12 +33,8 @@ pub mod gen {
 pub use prost_types;
 
 // Re-export the most-used types at the crate root for convenience.
-pub use gen::{
-    Begin, Call, Chunk, Data, End, Frame, Metadata, ResponseFrame, Routing, Strings,
-};
-pub use gen::signaling::{
-    AnnounceRequest, IceCandidate, SdpAnswer, SdpOffer, SignalMessage,
-};
+pub use gen::signaling::{AnnounceRequest, IceCandidate, SdpAnswer, SdpOffer, SignalMessage};
+pub use gen::{Begin, Call, Chunk, Data, End, Frame, Metadata, ResponseFrame, Routing, Strings};
 pub use google::rpc::Status;
 
 // ─── Wire thresholds (match Go/TS) ───────────────────────────
@@ -98,7 +94,10 @@ pub fn try_decode_frame(buf: &[u8]) -> Result<Option<(Frame, usize)>, DecodeErro
     }
     let length = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     if length > MAX_FRAME_SIZE {
-        return Err(DecodeError::Oversized { length, max: MAX_FRAME_SIZE });
+        return Err(DecodeError::Oversized {
+            length,
+            max: MAX_FRAME_SIZE,
+        });
     }
     let total = 4 + length;
     if buf.len() < total {
@@ -109,13 +108,18 @@ pub fn try_decode_frame(buf: &[u8]) -> Result<Option<(Frame, usize)>, DecodeErro
 }
 
 /// Attempt to decode a length-prefixed ResponseFrame.
-pub fn try_decode_response_frame(buf: &[u8]) -> Result<Option<(ResponseFrame, usize)>, DecodeError> {
+pub fn try_decode_response_frame(
+    buf: &[u8],
+) -> Result<Option<(ResponseFrame, usize)>, DecodeError> {
     if buf.len() < 4 {
         return Ok(None);
     }
     let length = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     if length > MAX_FRAME_SIZE {
-        return Err(DecodeError::Oversized { length, max: MAX_FRAME_SIZE });
+        return Err(DecodeError::Oversized {
+            length,
+            max: MAX_FRAME_SIZE,
+        });
     }
     let total = 4 + length;
     if buf.len() < total {

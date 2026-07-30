@@ -1,4 +1,4 @@
-use peerrpc::{parse_target, format_target, Scheme, RoleHint, Target, TargetParseError};
+use peerrpc::{format_target, parse_target, RoleHint, Scheme, Target, TargetParseError};
 
 #[test]
 fn parse_connect_with_port_and_query() {
@@ -6,27 +6,33 @@ fn parse_connect_with_port_and_query() {
         "peerrpc+connect://signal.example.com:443/echo.Echo?as=client&peer=alice&token=jwt",
     )
     .unwrap();
-    assert_eq!(t, Target {
-        scheme: Scheme::Connect,
-        signal: "signal.example.com:443".into(),
-        service: "echo.Echo".into(),
-        role: Some(RoleHint::Client),
-        peer_id: Some("alice".into()),
-        token: Some("jwt".into()),
-    });
+    assert_eq!(
+        t,
+        Target {
+            scheme: Scheme::Connect,
+            signal: "signal.example.com:443".into(),
+            service: "echo.Echo".into(),
+            role: Some(RoleHint::Client),
+            peer_id: Some("alice".into()),
+            token: Some("jwt".into()),
+        }
+    );
 }
 
 #[test]
 fn parse_local_empty_authority() {
     let t = parse_target("peerrpc+local:///echo.Echo").unwrap();
-    assert_eq!(t, Target {
-        scheme: Scheme::Local,
-        signal: String::new(),
-        service: "echo.Echo".into(),
-        role: None,
-        peer_id: None,
-        token: None,
-    });
+    assert_eq!(
+        t,
+        Target {
+            scheme: Scheme::Local,
+            signal: String::new(),
+            service: "echo.Echo".into(),
+            role: None,
+            peer_id: None,
+            token: None,
+        }
+    );
 }
 
 #[test]

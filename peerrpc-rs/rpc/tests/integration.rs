@@ -40,8 +40,14 @@ fn bridge() -> (BridgeTransport, BridgeTransport) {
     let (client_to_server_tx, client_to_server_rx) = mpsc::unbounded_channel();
     let (server_to_client_tx, server_to_client_rx) = mpsc::unbounded_channel();
     (
-        BridgeTransport { outbound: server_to_client_tx, inbound: client_to_server_rx },
-        BridgeTransport { outbound: client_to_server_tx, inbound: server_to_client_rx },
+        BridgeTransport {
+            outbound: server_to_client_tx,
+            inbound: client_to_server_rx,
+        },
+        BridgeTransport {
+            outbound: client_to_server_tx,
+            inbound: server_to_client_rx,
+        },
     )
 }
 
@@ -58,7 +64,10 @@ fn echo_server() -> Server {
                 handler: Arc::new(|s: ServerStream| {
                     Box::pin(async move {
                         let Some(req) = s.recv().await else {
-                            return Status { code: 13, message: "empty".into() };
+                            return Status {
+                                code: 13,
+                                message: "empty".into(),
+                            };
                         };
                         let mut echo = b"echo: ".to_vec();
                         echo.extend_from_slice(&req);
@@ -72,7 +81,11 @@ fn echo_server() -> Server {
                 kind: MethodKind::ServerStreaming,
                 handler: Arc::new(|s: ServerStream| {
                     Box::pin(async move {
-                        let label = s.recv().await.map(|r| String::from_utf8_lossy(&r).to_string()).unwrap_or_default();
+                        let label = s
+                            .recv()
+                            .await
+                            .map(|r| String::from_utf8_lossy(&r).to_string())
+                            .unwrap_or_default();
                         for i in 1..=5 {
                             let _ = s.send(format!("chunk {i} for {label}").into_bytes()).await;
                         }
@@ -88,7 +101,12 @@ fn echo_server() -> Server {
                         let mut seq = 0;
                         while let Some(msg) = s.recv().await {
                             seq += 1;
-                            let _ = s.send(format!("ack {seq}: {}", String::from_utf8_lossy(&msg)).into_bytes()).await;
+                            let _ = s
+                                .send(
+                                    format!("ack {seq}: {}", String::from_utf8_lossy(&msg))
+                                        .into_bytes(),
+                                )
+                                .await;
                         }
                         Status::ok()
                     })
@@ -116,7 +134,10 @@ async fn test_bridge_unary() {
     spawn_server(srv, server_t);
     let client = Client::new(client_t);
 
-    let (resp, status) = client.invoke_unary("/echo.Echo/Unary", b"hello").await.unwrap();
+    let (resp, status) = client
+        .invoke_unary("/echo.Echo/Unary", b"hello")
+        .await
+        .unwrap();
     assert!(status.is_ok(), "status: {status:?}");
     assert_eq!(resp, b"echo: hello");
 }
@@ -129,9 +150,18 @@ async fn test_bridge_concurrent_unary() {
     let client = Client::new(client_t);
 
     // Three concurrent unary calls on the same client.
-    let h1 = { let c = client.clone(); tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"one").await }) };
-    let h2 = { let c = client.clone(); tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"two").await }) };
-    let h3 = { let c = client.clone(); tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"three").await }) };
+    let h1 = {
+        let c = client.clone();
+        tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"one").await })
+    };
+    let h2 = {
+        let c = client.clone();
+        tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"two").await })
+    };
+    let h3 = {
+        let c = client.clone();
+        tokio::spawn(async move { c.invoke_unary("/echo.Echo/Unary", b"three").await })
+    };
 
     let r1 = h1.await.unwrap().unwrap();
     let r2 = h2.await.unwrap().unwrap();
@@ -139,7 +169,10 @@ async fn test_bridge_concurrent_unary() {
 
     assert!(r1.1.is_ok() && r2.1.is_ok() && r3.1.is_ok());
     // Each response echoes its own request; collect and verify all present.
-    let mut got: Vec<String> = [r1.0, r2.0, r3.0].iter().map(|b| String::from_utf8_lossy(b).into_owned()).collect();
+    let mut got: Vec<String> = [r1.0, r2.0, r3.0]
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .collect();
     got.sort();
     assert_eq!(got, vec!["echo: one", "echo: three", "echo: two"]);
 }
@@ -151,7 +184,10 @@ async fn test_bridge_server_streaming() {
     spawn_server(srv, server_t);
     let client = Client::new(client_t);
 
-    let mut stream = client.invoke_server_streaming("/echo.Echo/Stream", b"flow").await.unwrap();
+    let mut stream = client
+        .invoke_server_streaming("/echo.Echo/Stream", b"flow")
+        .await
+        .unwrap();
     let mut chunks = Vec::new();
     while let Some(chunk) = stream.recv().await {
         chunks.push(String::from_utf8_lossy(&chunk).into_owned());
@@ -169,7 +205,10 @@ async fn test_bridge_bidi() {
     spawn_server(srv, server_t);
     let client = Client::new(client_t);
 
-    let mut stream = client.invoke_bidi_streaming("/echo.Echo/Chat").await.unwrap();
+    let mut stream = client
+        .invoke_bidi_streaming("/echo.Echo/Chat")
+        .await
+        .unwrap();
     for i in 1..=3 {
         let msg = format!("m{i}");
         stream.send(msg.as_bytes()).unwrap();
@@ -194,11 +233,16 @@ async fn test_bridge_multi_client() {
     for i in 0..3 {
         let (client_t, server_t) = bridge();
         let srv = srv.clone();
-        tokio::spawn(async move { srv.serve(server_t).await; });
+        tokio::spawn(async move {
+            srv.serve(server_t).await;
+        });
         let client = Client::new(client_t);
         let req = format!("client-{i}");
         handles.push(tokio::spawn(async move {
-            client.invoke_unary("/echo.Echo/Unary", req.as_bytes()).await.unwrap()
+            client
+                .invoke_unary("/echo.Echo/Unary", req.as_bytes())
+                .await
+                .unwrap()
         }));
     }
 
@@ -233,7 +277,9 @@ async fn test_bridge_client_disconnect_cleans_up() {
     let srv = Arc::new(srv);
 
     let (client_t, server_t) = bridge();
-    let serve_handle = tokio::spawn(async move { srv.serve(server_t).await; });
+    let serve_handle = tokio::spawn(async move {
+        srv.serve(server_t).await;
+    });
     let client = Client::new(client_t);
 
     // Give the server a moment, then drop the client. Dropping the

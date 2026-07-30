@@ -152,9 +152,7 @@ async fn open_session(t: &Target, peer_id: &str) -> Result<Session, FacadeError>
                 .await
                 .map_err(FacadeError::Signal)
         }
-        Scheme::Ws | Scheme::Relay => {
-            Err(FacadeError::UnsupportedScheme(t.scheme.as_str().into()))
-        }
+        Scheme::Ws | Scheme::Relay => Err(FacadeError::UnsupportedScheme(t.scheme.as_str().into())),
     }
 }
 

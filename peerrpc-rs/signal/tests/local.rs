@@ -1,6 +1,6 @@
 // Sanity tests for the Local backend.
 
-use peerrpc_signal::{Local, SignalBody, SdpOffer};
+use peerrpc_signal::{Local, SdpOffer, SignalBody};
 
 #[tokio::test]
 async fn local_exchange_by_service_and_broadcasts() {

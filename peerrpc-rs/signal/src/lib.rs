@@ -78,9 +78,7 @@ impl Session {
     }
 
     pub fn send(&self, msg: SignalMessage) -> Result<(), SignalError> {
-        self.outbound
-            .send(msg)
-            .map_err(|_| SignalError::Closed)
+        self.outbound.send(msg).map_err(|_| SignalError::Closed)
     }
 
     /// Returns a clonable sender so peer code can pump outbound
@@ -120,14 +118,12 @@ struct Room {
 
 impl Local {
     pub fn new() -> Self {
-        Self { rooms: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            rooms: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    pub async fn exchange(
-        &self,
-        service: &str,
-        peer_id: &str,
-    ) -> Result<Session, SignalError> {
+    pub async fn exchange(&self, service: &str, peer_id: &str) -> Result<Session, SignalError> {
         if service.is_empty() {
             return Err(SignalError::Other("empty service".into()));
         }
@@ -136,9 +132,9 @@ impl Local {
         }
 
         let mut rooms = self.rooms.lock().await;
-        let room = rooms
-            .entry(service.to_string())
-            .or_insert_with(|| Room { peers: HashMap::new() });
+        let room = rooms.entry(service.to_string()).or_insert_with(|| Room {
+            peers: HashMap::new(),
+        });
 
         if room.peers.contains_key(peer_id) {
             return Err(SignalError::Other(format!(
@@ -211,11 +207,7 @@ async fn broadcast(
     }
 }
 
-async fn leave(
-    rooms: &Arc<Mutex<HashMap<String, Room>>>,
-    service: &str,
-    peer_id: &str,
-) {
+async fn leave(rooms: &Arc<Mutex<HashMap<String, Room>>>, service: &str, peer_id: &str) {
     let mut rooms = rooms.lock().await;
     if let Some(room) = rooms.get_mut(service) {
         room.peers.remove(peer_id);

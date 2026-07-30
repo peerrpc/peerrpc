@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use peerrpc_protocol::{
-    encode_response_frame, try_decode_frame, gen, Begin, Chunk, Data, End, Frame, Routing,
+    encode_response_frame, gen, try_decode_frame, Begin, Chunk, Data, End, Frame, Routing,
     CHUNK_SIZE, MESSAGE_MAX,
 };
 use peerrpc_transport::Reassembler;
@@ -48,7 +48,9 @@ pub struct Server {
 
 impl Server {
     pub fn new() -> Self {
-        Self { methods: HashMap::new() }
+        Self {
+            methods: HashMap::new(),
+        }
     }
 
     pub fn register_service(&mut self, desc: ServiceDesc) {
@@ -68,8 +70,7 @@ impl Server {
 
     pub async fn serve<T: WireTransport>(&self, mut transport: T) {
         let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<RespFrame>();
-        let streams: Arc<Mutex<HashMap<i32, StreamState>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let streams: Arc<Mutex<HashMap<i32, StreamState>>> = Arc::new(Mutex::new(HashMap::new()));
         let mut buf = Vec::new();
         let mut reasm = Reassembler::new();
 
@@ -141,9 +142,12 @@ impl Server {
                         Self::end_stream_with_error(seq, resp_tx, "duplicate sequence");
                         return;
                     }
-                    guard.insert(seq, StreamState {
-                        inbound: Some(inbound_tx),
-                    });
+                    guard.insert(
+                        seq,
+                        StreamState {
+                            inbound: Some(inbound_tx),
+                        },
+                    );
                 }
 
                 let handler = method.handler;
@@ -182,9 +186,12 @@ impl Server {
             Some(FType::Data(data)) => {
                 let payload = match data.content {
                     Some(gen::data::Content::Message(msg)) => Some(msg),
-                    Some(gen::data::Content::Chunk(chunk)) => {
-                        reasm.reassemble(seq, chunk.total_size as usize, chunk.offset as usize, &chunk.data)
-                    }
+                    Some(gen::data::Content::Chunk(chunk)) => reasm.reassemble(
+                        seq,
+                        chunk.total_size as usize,
+                        chunk.offset as usize,
+                        &chunk.data,
+                    ),
                     None => None,
                 };
                 if let Some(payload) = payload {
@@ -194,7 +201,9 @@ impl Server {
                     };
                     if let Some(tx) = inbound_tx {
                         if tx.try_send(payload).is_err() {
-                            tracing::warn!("server: inbound queue full, dropping data for seq {seq}");
+                            tracing::warn!(
+                                "server: inbound queue full, dropping data for seq {seq}"
+                            );
                         }
                     }
                 }
@@ -216,11 +225,7 @@ impl Server {
         }
     }
 
-    fn end_stream_with_error(
-        seq: i32,
-        resp_tx: &mpsc::UnboundedSender<RespFrame>,
-        msg: &str,
-    ) {
+    fn end_stream_with_error(seq: i32, resp_tx: &mpsc::UnboundedSender<RespFrame>, msg: &str) {
         let _ = resp_tx.send(RespFrame {
             frame: peerrpc_protocol::ResponseFrame {
                 routing: Some(Routing { sequence: seq }),

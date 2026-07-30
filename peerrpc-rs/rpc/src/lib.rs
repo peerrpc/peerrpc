@@ -11,9 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 
 use peerrpc_protocol::{
-    encode_frame, try_decode_response_frame, gen,
-    Call, Chunk, Data, End, Frame, Routing,
-    INLINE_MAX, MESSAGE_MAX, CHUNK_SIZE,
+    encode_frame, gen, try_decode_response_frame, Call, Chunk, Data, End, Frame, Routing,
+    CHUNK_SIZE, INLINE_MAX, MESSAGE_MAX,
 };
 pub mod server;
 
@@ -39,8 +38,12 @@ pub struct Status {
 }
 
 impl Status {
-    pub fn ok() -> Self { Self::default() }
-    pub fn is_ok(&self) -> bool { self.code == 0 }
+    pub fn ok() -> Self {
+        Self::default()
+    }
+    pub fn is_ok(&self) -> bool {
+        self.code == 0
+    }
 }
 
 /// Errors returned by Client methods.
@@ -117,7 +120,10 @@ impl Client {
             Some(data) if !status.is_ok() => Ok((data, status)),
             Some(_) => Ok((Vec::new(), status)),
             None if status.is_ok() => Err(RpcError::Other("no response before End".into())),
-            None => Err(RpcError::Status { code: status.code, message: status.message }),
+            None => Err(RpcError::Status {
+                code: status.code,
+                message: status.message,
+            }),
         }
     }
 
@@ -151,10 +157,7 @@ impl Client {
     /// End{close_send} → Data* → End{status}); the difference is
     /// purely in how the application uses recv() — multiple
     /// responses interleaved with sends.
-    pub async fn invoke_bidi_streaming(
-        &self,
-        method: &str,
-    ) -> Result<ClientStream, RpcError> {
+    pub async fn invoke_bidi_streaming(&self, method: &str) -> Result<ClientStream, RpcError> {
         self.open_client_stream(method, None).await
     }
 
@@ -192,15 +195,21 @@ impl Client {
         if half_close {
             self.send(Frame {
                 routing: Some(Routing { sequence: seq }),
-                r#type: Some(gen::frame::Type::End(End { close_send: true, ..Default::default() })),
+                r#type: Some(gen::frame::Type::End(End {
+                    close_send: true,
+                    ..Default::default()
+                })),
             })?;
         }
 
         // Register stream state so the run loop can dispatch.
-        self.streams.lock().await.insert(seq, StreamState {
-            inbound: inbound_tx,
-            end: Some(end_tx),
-        });
+        self.streams.lock().await.insert(
+            seq,
+            StreamState {
+                inbound: inbound_tx,
+                end: Some(end_tx),
+            },
+        );
 
         Ok(ClientStream {
             seq,
@@ -248,10 +257,13 @@ impl Client {
         }
 
         // Register stream state so the run loop can dispatch.
-        self.streams.lock().await.insert(seq, StreamState {
-            inbound: inbound_tx,
-            end: Some(end_tx),
-        });
+        self.streams.lock().await.insert(
+            seq,
+            StreamState {
+                inbound: inbound_tx,
+                end: Some(end_tx),
+            },
+        );
 
         Ok(ClientStream {
             seq,
@@ -354,37 +366,40 @@ impl Client {
             Some(RType::Begin(begin)) => {
                 if let Some(data) = begin.inline_data {
                     if state.inbound.try_send(data).is_err() {
-                        tracing::warn!("client: inbound queue full, dropping begin inline for seq {seq}");
+                        tracing::warn!(
+                            "client: inbound queue full, dropping begin inline for seq {seq}"
+                        );
                     }
                 }
             }
-            Some(RType::Data(data)) => {
-                match data.content {
-                    Some(gen::data::Content::Message(msg)) => {
-                        if state.inbound.try_send(msg).is_err() {
-                            tracing::warn!("client: inbound queue full, dropping data for seq {seq}");
-                        }
+            Some(RType::Data(data)) => match data.content {
+                Some(gen::data::Content::Message(msg)) => {
+                    if state.inbound.try_send(msg).is_err() {
+                        tracing::warn!("client: inbound queue full, dropping data for seq {seq}");
                     }
-                    Some(gen::data::Content::Chunk(chunk)) => {
-                        if let Some(full) = reasm.reassemble(
-                            seq,
-                            chunk.total_size as usize,
-                            chunk.offset as usize,
-                            &chunk.data,
-                        ) {
-                            if state.inbound.try_send(full).is_err() {
-                                tracing::warn!("client: inbound queue full, dropping reassembled chunk for seq {seq}");
-                            }
-                        }
-                    }
-                    None => {}
                 }
-            }
+                Some(gen::data::Content::Chunk(chunk)) => {
+                    if let Some(full) = reasm.reassemble(
+                        seq,
+                        chunk.total_size as usize,
+                        chunk.offset as usize,
+                        &chunk.data,
+                    ) {
+                        if state.inbound.try_send(full).is_err() {
+                            tracing::warn!("client: inbound queue full, dropping reassembled chunk for seq {seq}");
+                        }
+                    }
+                }
+                None => {}
+            },
             Some(RType::End(end)) => {
-                let status = end.status.map(|s| Status {
-                    code: s.code,
-                    message: s.message,
-                }).unwrap_or_default();
+                let status = end
+                    .status
+                    .map(|s| Status {
+                        code: s.code,
+                        message: s.message,
+                    })
+                    .unwrap_or_default();
                 if let Some(end_tx) = state.end.take() {
                     let _ = end_tx.send(status);
                 }

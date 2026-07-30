@@ -212,10 +212,14 @@ pub fn format_target(t: &Target) -> String {
         s.push_str(val);
     };
     if let Some(r) = t.role {
-        add("as", match r {
-            RoleHint::Client => "client",
-            RoleHint::Server => "server",
-        }, &mut first);
+        add(
+            "as",
+            match r {
+                RoleHint::Client => "client",
+                RoleHint::Server => "server",
+            },
+            &mut first,
+        );
     }
     if let Some(p) = &t.peer_id {
         add("peer", p, &mut first);
