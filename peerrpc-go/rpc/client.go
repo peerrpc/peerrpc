@@ -22,7 +22,7 @@ import (
 type Client struct {
 	ch              *transport.Channel
 	reasm           *transport.Reassembler
-	seqAlloc        atomic.Int32
+	seqAlloc        atomic.Uint32
 	unaryInterceptors []UnaryClientInterceptor
 
 	mu      sync.Mutex
@@ -39,6 +39,7 @@ func NewClient(ch *transport.Channel, opts ...ClientOption) *Client {
 		reasm:   transport.NewReassembler(),
 		streams: map[int]*clientStream{},
 	}
+	c.seqAlloc.Store(1)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -107,13 +108,15 @@ type endResult struct {
 
 // nextSeq allocates an odd sequence number (client-initiated streams
 // use odd numbers; even numbers are reserved for future server-push).
+//
+// seqAlloc is a Uint32 starting at 1 and incrementing by 2. The result
+// is masked into positive int32 range (the wire field is int32) so a
+// wrap at 2^31 returns a small positive odd number instead of spinning.
+// In practice the wrap is unhit (2^31 client-initiated streams); when
+// it does wrap, prior streams with that sequence are long gone.
 func (c *Client) nextSeq() int {
-	for {
-		n := c.seqAlloc.Add(2)
-		if n > 0 {
-			return int(n)
-		}
-	}
+	n := c.seqAlloc.Add(2)
+	return int(n & 0x7FFFFFFF)
 }
 
 // dispatch routes one ResponseFrame to its stream.
@@ -168,11 +171,13 @@ func (c *Client) dispatch(f *peerrpcpb.ResponseFrame) {
 }
 
 // deliver pushes one response payload into the stream's inbound chan.
+// It blocks until the stream consumes it or the stream ends, rather
+// than spawning an unbounded goroutine per backlog item (which leaked
+// goroutines and memory under streaming load).
 func (c *Client) deliver(cs *clientStream, payload []byte) {
 	select {
 	case cs.inbound <- inboundResp{data: payload}:
-	default:
-		go func() { cs.inbound <- inboundResp{data: payload} }()
+	case <-cs.end:
 	}
 }
 
@@ -454,9 +459,9 @@ func (s *ClientStream) CloseSend() error {
 // Recv returns the next response message. Returns io.EOF when the
 // server has cleanly closed.
 //
-// When both inbound and end are ready (typical when the server sent
-// all messages and End back-to-back before the caller first Recvs),
-// Recv drains inbound first before declaring EOF.
+// The non-blocking check drains any already-queued message first;
+// since deliver no longer spawns goroutines, queued data is always
+// visible to the non-blocking check before the End frame arrives.
 func (s *ClientStream) Recv() ([]byte, error) {
 	select {
 	case r := <-s.cs.inbound:

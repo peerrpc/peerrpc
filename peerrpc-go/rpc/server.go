@@ -200,10 +200,12 @@ func (m *multiplexer) openStream(ctx context.Context, s *Server, seq int, call *
 	m.mu.Unlock()
 
 	if call.InlineData != nil {
+		// Deliver inline synchronously so the handler's first Recv sees
+		// the payload before a half-close EOF. The inbound buffer is
+		// empty at stream open, so this never blocks the serve loop.
 		select {
 		case stream.inbound <- call.InlineData:
-		default:
-			go func() { stream.inbound <- call.InlineData }()
+		case <-stream.ctx.Done():
 		}
 	}
 

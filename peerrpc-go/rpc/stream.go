@@ -89,9 +89,10 @@ func (s *ServerStream) Method() string { return s.method }
 // Recv blocks until the next request message arrives, the client
 // half-closes (returns io.EOF), or ctx is canceled.
 //
-// When both inbound and halfClose are ready (common when a Unary
-// client inlines its payload and immediately half-closes), Recv
-// drains pending messages first before declaring EOF.
+// The non-blocking check first drains any already-queued message
+// (inline_data is now delivered synchronously at stream open, so it is
+// always present before the handler calls Recv). The blocking select
+// then waits for subsequent Data frames or half-close.
 func (s *ServerStream) Recv() ([]byte, error) {
 	// Non-blocking check first so the inline-payload + CloseSend race
 	// resolves in favor of delivering data.
