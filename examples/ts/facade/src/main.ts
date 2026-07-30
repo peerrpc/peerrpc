@@ -3,8 +3,8 @@
  * for TypeScript.
  *
  * Requires `wrtc` for Node.js RTCPeerConnection (the browser
- * doesn't need a polyfill; see examples/ts/chat for the browser
- * path with @peerrpc/react).
+ * doesn't need a polyfill; see examples/ts/echo for the browser
+ * path).
  *
  *   npm i
  *   npm run dev

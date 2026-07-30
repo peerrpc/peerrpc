@@ -9,9 +9,13 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./gen/*": {
+      "import": "./dist/gen/*",
+      "types": "./dist/gen/*.d.ts"
+    },
     "./gen": {
-      "import": "./src/gen/index.js",
-      "types": "./src/gen/index.d.ts"
+      "import": "./dist/gen/index.js",
+      "types": "./dist/gen/index.d.ts"
     }
   },
   "dependencies": {

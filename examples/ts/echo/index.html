@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeerRPC Echo Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+    h1 { font-size: 1.4em; }
+    .row { margin: 0.5em 0; }
+    button { padding: 0.3em 0.8em; margin-right: 0.3em; }
+    #log { background: #f5f5f5; border: 1px solid #ddd; padding: 0.5em; height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; }
+    .info { color: #666; font-size: 0.85em; }
+    input { width: 300px; }
+  </style>
+</head>
+<body>
+  <h1>PeerRPC Echo Demo</h1>
+  <p class="info">
+    Connects to a PeerRPC signal-server and issues all four RPC types
+    against the <code>echo.Echo</code> service. Requires a signal-server
+    running with <code>-auto-tls</code> on <code>localhost:8443</code>.
+  </p>
+  <div class="row">
+    <label>Signal URL: <input id="signalUrl" value="https://localhost:8443" /></label>
+  </div>
+  <div class="row">
+    <label>Service: <input id="service" value="echo.Echo" /></label>
+  </div>
+  <div class="row">
+    <button id="connect">Connect</button>
+    <button id="unary" disabled>Unary</button>
+    <button id="stream" disabled>Server Stream</button>
+    <button id="collect" disabled>Client Stream</button>
+    <button id="chat" disabled>Bidi Chat</button>
+  </div>
+  <div class="row">
+    <label>Request: <input id="request" value="hello, peerrpc" /></label>
+  </div>
+  <div id="log"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
