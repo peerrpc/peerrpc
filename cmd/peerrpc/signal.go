@@ -42,6 +42,7 @@ var signalFlags struct {
 	jwtSecret  string
 	tlsCert    string
 	tlsKey     string
+	autoTLS    bool
 }
 
 func init() {
@@ -51,10 +52,25 @@ func init() {
 	f.StringVar(&signalFlags.jwtSecret, "jwt-secret", "", "HMAC-SHA256 secret for JWT verification")
 	f.StringVar(&signalFlags.tlsCert, "tls-cert", "", "path to TLS certificate")
 	f.StringVar(&signalFlags.tlsKey, "tls-key", "", "path to TLS private key")
+	f.BoolVar(&signalFlags.autoTLS, "auto-tls", false, "generate an ephemeral self-signed cert at startup (for browser dev/testing)")
 }
 
 func runSignal(_ *cobra.Command, _ []string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// --auto-tls: generate an ephemeral self-signed certificate so
+	// browsers can reach connect-web (which requires HTTP/2-over-TLS)
+	// without pre-provisioned cert files.
+	if signalFlags.autoTLS && (signalFlags.tlsCert == "" || signalFlags.tlsKey == "") {
+		cert, key, err := generateSelfSignedCert()
+		if err != nil {
+			logger.Error("auto-tls cert generation", "err", err)
+			return err
+		}
+		signalFlags.tlsCert = cert
+		signalFlags.tlsKey = key
+		logger.Info("auto-TLS: generated ephemeral self-signed certificate")
+	}
 
 	mem := store.NewMemory()
 	svc := server.New(mem, server.Config{Logger: logger})

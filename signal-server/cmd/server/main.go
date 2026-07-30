@@ -48,9 +48,24 @@ func main() {
 	jwtSecret := flag.String("jwt-secret", "", "HMAC-SHA256 secret for JWT verification (production auth)")
 	tlsCert := flag.String("tls-cert", "", "path to TLS certificate (enables HTTPS)")
 	tlsKey := flag.String("tls-key", "", "path to TLS private key (enables HTTPS)")
+	autoTLS := flag.Bool("auto-tls", false, "generate an ephemeral self-signed cert at startup (for browser dev/testing)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// --auto-tls: generate an ephemeral self-signed certificate so
+	// browsers can reach connect-web (which requires HTTP/2-over-TLS)
+	// without pre-provisioned cert files.
+	if *autoTLS && (*tlsCert == "" || *tlsKey == "") {
+		cert, key, err := generateSelfSignedCert()
+		if err != nil {
+			logger.Error("auto-tls cert generation", "err", err)
+			os.Exit(1)
+		}
+		*tlsCert = cert
+		*tlsKey = key
+		logger.Info("auto-TLS: generated ephemeral self-signed certificate")
+	}
 
 	mem := store.NewMemory()
 	svc := server.New(mem, server.Config{Logger: logger})
