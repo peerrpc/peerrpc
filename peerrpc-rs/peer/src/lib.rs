@@ -308,7 +308,18 @@ impl WireTransport for Peer {
         // the buffer and webrtc-rs tears down the association.
         self.await_buffer_low(&dc).await?;
 
-        dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string())
+        let res = dc.send(&frame).await.map(|_| ()).map_err(|e| e.to_string());
+        if res.is_ok() {
+            // We just enqueued a potentially large frame. Wait for it
+            // (and any pending frames) to drain below the watermark
+            // BEFORE returning, so the next send() call does not stack
+            // another big frame on top. Otherwise webrtc-rs 0.17's SCTP
+            // stream buffer overflows and tears down the association
+            // (the 5×255 KiB chunk pattern of LargeEcho reproduces
+            // this without the post-send wait).
+            self.await_buffer_low(&dc).await?;
+        }
+        res
     }
 
     async fn recv_frame(&mut self) -> Option<Bytes> {
@@ -328,9 +339,7 @@ impl Peer {
             // Wait for the low-watermark notification (armed via
             // on_buffered_amount_low in setup_backpressure).
             tokio::select! {
-                _ = self.buffered_low.notified() => {
-                    // Re-check in the next iteration.
-                }
+                _ = self.buffered_low.notified() => {}
                 _ = self.closed.notified() => {
                     return Err("peer: data channel closed while waiting for backpressure".into());
                 }
@@ -359,22 +368,23 @@ fn setup_on_message(dc: &Arc<RTCDataChannel>, tx: mpsc::UnboundedSender<Bytes>) 
 /// in webrtc-rs 0.17, so it runs on a spawned task (this fn is called
 /// from both async and sync-on_data_channel contexts).
 fn setup_backpressure(dc: &Arc<RTCDataChannel>, buffered_low: Arc<Notify>, closed: Arc<Notify>) {
-    // on_buffered_amount_low and set_buffered_amount_low_threshold are
-    // async in webrtc-rs 0.17, but setup_backpressure is called from a
-    // sync on_data_channel callback, so register them on spawned tasks.
+    // on_buffered_amount_low is sync in webrtc-rs 0.17; register it
+    // inline so the callback is armed before any dc.send() can fire
+    // the event. (An earlier version wrapped this in tokio::spawn
+    // because the threshold setter is async, but the spawn meant the
+    // low-watermark callback was registered AFTER the first burst of
+    // large sends, and webrtc-rs reset the SCTP stream before the
+    // callback could catch the drain event — tearing down the
+    // channel mid-echo.)
     let bl = buffered_low.clone();
-    let dc_clone = dc.clone();
-    tokio::spawn(async move {
-        dc_clone
-            .on_buffered_amount_low(Box::new(move || {
-                let bl = bl.clone();
-                Box::pin(async move {
-                    bl.notify_waiters();
-                })
-            }))
-            .await;
-    });
+    dc.on_buffered_amount_low(Box::new(move || {
+        let bl = bl.clone();
+        Box::pin(async move {
+            bl.notify_waiters();
+        })
+    }));
 
+    // set_buffered_amount_low_threshold is async, so run it on a task.
     let dc_clone = dc.clone();
     tokio::spawn(async move {
         dc_clone
@@ -389,7 +399,7 @@ fn setup_backpressure(dc: &Arc<RTCDataChannel>, buffered_low: Arc<Notify>, close
         Box::pin(async move {
             cl.notify_waiters();
         })
-    }));
+    }))
 }
 
 fn setup_on_open(dc: &Arc<RTCDataChannel>, notify: Arc<Notify>) {
@@ -398,7 +408,7 @@ fn setup_on_open(dc: &Arc<RTCDataChannel>, notify: Arc<Notify>) {
         Box::pin(async move {
             n.notify_waiters();
         })
-    }));
+    }))
 }
 
 async fn wait_ice_complete(pc: &Arc<RTCPeerConnection>) {

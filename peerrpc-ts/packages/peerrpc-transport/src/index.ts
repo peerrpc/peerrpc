@@ -67,10 +67,27 @@ export class Channel {
 
   constructor(dc: RTCDataChannel, cfg?: TransportConfig) {
     this.dc = dc;
-    this.highWatermark = cfg?.bufferedAmountHigh ?? BUFFERED_AMOUNT_HIGH;
+    // Browser-side backpressure threshold. Lower than BUFFERED_AMOUNT_HIGH
+    // (1 MiB) because the browser's SCTP send buffer can saturate at
+    // ~1 MiB and a burst of frames (even 60 KiB ones) will exceed it
+    // before the browser's bufferedamountlow event fires. 60 KiB gives
+    // one chunk of headroom so the awaitBufferLow trigger fires after
+    // each big send, draining the buffer before the next one stacks.
+    this.highWatermark = cfg?.bufferedAmountHigh ?? (60 * 1024);
     this.decodeMode = cfg?.decodeMode ?? "response";
     dc.binaryType = "arraybuffer";
-    dc.onmessage = (ev) => this.handleMessage(ev);
+    dc.onmessage = (ev) => {
+      // An uncaught error in handleMessage (e.g. an oversized frame)
+      // would otherwise propagate to the browser and silently close
+      // the DataChannel; isolate it so a single bad frame is logged
+      // and dropped instead of tearing down the channel.
+      try {
+        this.handleMessage(ev);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[peerrpc-transport] frame decode failed:", err);
+      }
+    };
     dc.onclose = () => this.handleClose();
     dc.onerror = () => this.handleClose();
     dc.bufferedAmountLowThreshold = this.highWatermark;
@@ -121,6 +138,16 @@ export class Channel {
       ? encodeResponseFrame(frame as ResponseFrame)
       : encodeFrame(frame as Frame);
     this.dc.send(encoded);
+    // Post-send drain: RTCDataChannel.send queues the bytes into the
+    // browser's SCTP buffer and returns void. Without waiting for the
+    // queue to drain below the watermark, a burst of large sends (e.g.
+    // the 5×255 KiB chunks of a 1 MiB LargeEcho request) stacks past
+    // the webrtc-rs SCTP stream buffer (~1 MiB internal) and the
+    // browser tears down the DataChannel mid-upload — before any
+    // server-side handler ever sees the data.
+    if (this.dc.bufferedAmount >= this.highWatermark) {
+      await this.awaitBufferLow();
+    }
   }
 
   /**
@@ -225,6 +252,10 @@ export class Channel {
 
   private awaitBufferLow(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (this.closed) {
+        reject(new Error("transport: channel closed while waiting for buffer drain"));
+        return;
+      }
       if (this.dc.bufferedAmount < this.highWatermark) {
         resolve();
         return;
@@ -233,17 +264,13 @@ export class Channel {
         this.dc.removeEventListener("bufferedamountlow", handler);
         resolve();
       };
-      this.dc.addEventListener("bufferedamountlow", handler);
-      // Safety timeout: resolve after 5s even if the event never
-      // fires so callers do not hang forever on a dead channel.
-      setTimeout(() => {
+      const closeHandler = () => {
         this.dc.removeEventListener("bufferedamountlow", handler);
-        if (this.closed) {
-          reject(new Error("transport: channel closed while waiting for buffer drain"));
-        } else {
-          resolve();
-        }
-      }, 5000);
+        this.dc.removeEventListener("close", closeHandler);
+        reject(new Error("transport: channel closed while waiting for buffer drain"));
+      };
+      this.dc.addEventListener("bufferedamountlow", handler);
+      this.dc.addEventListener("close", closeHandler);
     });
   }
 }

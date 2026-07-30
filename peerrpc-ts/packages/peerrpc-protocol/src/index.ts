@@ -26,20 +26,20 @@ import { Frame, ResponseFrame } from "./gen/peerrpc/peerrpc_pb.js";
  * transport-layer thresholds only (the wire carries total_size/offset/
  * data on Chunk), so each side may pick its own value.
  */
-// SCTP max-message-size is the wire-level frame ceiling negotiated
-// per RFC 8831. Both peers advertise a=max-message-size in their
-// local SDP; the SCTP transport picks min(remote, local can-send).
+// SCTP max-message-size is the wire-level frame ceiling negotiated per
+// RFC 8831. Both peers advertise a=max-message-size in their local
+// SDP; the SCTP transport picks min(remote, local can-send).
 //
-// peerrpc peers inject a=max-message-size:262144 into their local
-// SDPs so the negotiation reaches 256 KiB (pion already defaults to
-// this; webrtc-rs needs the injection + can_send=Unbounded on the
-// SettingEngine). Once both sides advertise ≥256 KiB, chunk sizes
-// of 255 KiB are safe.
-//
-// If a peer does NOT advertise (e.g. a vanilla browser against a
-// vanilla webrtc-rs with no injection), the negotiation falls back
-// to 64 KiB and 255 KiB chunks will be rejected — that's a peer
-// configuration issue, not a protocol limit.
+// CHUNK_SIZE is asymmetric across SDKs because Chromium's SCTP layer
+// (as of the versions in the wild) caps outbound DataChannel
+// messages at 65535 bytes regardless of the SDP
+// a=max-message-size, when sending from the browser. The server
+// direction (webrtc-rs → browser) is fine up to 262144, and pion
+// is fine in both directions. To stay under the browser's 64 KiB
+// cap we ship a 60 KiB CHUNK_SIZE for the client (TS) side; the
+// server (Rust/Go) keeps the 255 KiB version. The wire is fully
+// compatible: Chunk frames carry (total_size, offset, data) and
+// each SDK reassembles with its own threshold.
 const MAX_FRAME_BYTES = 256 * 1024;
 const FRAME_OVERHEAD = 1 * 1024; // 4-byte prefix + protobuf envelope (real ~40 B)
 
@@ -52,8 +52,14 @@ export const INLINE_MAX = 16 * 1024;
 /** Single Data.message threshold: payloads > this use Chunk frames. */
 export const MESSAGE_MAX = MAX_FRAME_BYTES - FRAME_OVERHEAD;
 
-/** Per-chunk payload size when fragmenting large messages. */
-export const CHUNK_SIZE = MAX_FRAME_BYTES - FRAME_OVERHEAD;
+/**
+ * Per-chunk payload size when fragmenting large messages. Sized to
+ * stay under 65535 (Chromium's hard cap on outbound DataChannel
+ * messages), with 1 KiB headroom for the length prefix and the
+ * protobuf envelope. The Rust and Go SDKs use a 255 KiB version
+ * since they negotiate 256 KiB reliably.
+ */
+export const CHUNK_SIZE = 60 * 1024;
 
 /** High-watermark for outbound backpressure (bytes in SCTP buffer). */
 export const BUFFERED_AMOUNT_HIGH = 1 << 20; // 1 MiB
