@@ -1,0 +1,20 @@
+[package]
+name = "peerrpc-echo"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "PeerRPC Rust echo demo: all four RPC patterns"
+
+[[bin]]
+name = "peerrpc-echo"
+path = "src/main.rs"
+
+[dependencies]
+peerrpc-protocol = { path = "../../../peerrpc-rs/protocol" }
+peerrpc-rpc = { path = "../../../peerrpc-rs/rpc" }
+peerrpc-peer = { path = "../../../peerrpc-rs/peer" }
+peerrpc-signal = { path = "../../../peerrpc-rs/signal" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }

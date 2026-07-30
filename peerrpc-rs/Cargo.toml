@@ -1,5 +1,5 @@
 [workspace]
-members = ["protocol", "transport", "rpc", "peer", "signal", "peerrpc", "examples/echo", "examples/facade"]
+members = ["protocol", "transport", "rpc", "peer", "signal", "peerrpc"]
 resolver = "2"
 
 [workspace.package]

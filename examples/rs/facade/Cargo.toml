@@ -1,0 +1,15 @@
+[package]
+name = "peerrpc-facade-demo"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "peerrpc-facade-demo"
+path = "src/main.rs"
+
+[dependencies]
+peerrpc = { path = "../../../peerrpc-rs/peerrpc" }
+peerrpc-rpc = { path = "../../../peerrpc-rs/rpc" }
+tokio = { version = "1", features = ["full"] }
