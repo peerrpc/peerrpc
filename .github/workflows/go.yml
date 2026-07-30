@@ -1,12 +1,12 @@
 # Go SDK CI: build, vet, lint, and test all Go modules in the repository.
 #
 # Modules:
-#   peerrpc-go/        — core SDK (protocol, transport, peer, rpc, signal, auth, crypto, observability, relay, grpcbridge)
-#   signal-server/     — standalone signaling server
-#   relay-server/      — standalone relay binary
-#   grpcbridge-server/ — standalone gRPC-Connect bridge binary
+#   peerrpc-go/        — core SDK (protocol, transport, peer, rpc, signal, auth,
+#                        crypto, observability, relay, grpcbridge, signalserver)
+#                        + cmd/peerrpc (the `peerrpc signal|relay|bridge` CLI)
 #   examples/echo-go/  — end-to-end echo demo
-#   test/cross-lang/go-ts/e2e/ — cross-language interop (Playwright, build-tag guarded)
+#   test/cross-lang/go-ts/ — cross-language interop harness
+#   test/cross-lang/go-ts/e2e/ — Playwright e2e (build-tag guarded)
 
 name: go
 

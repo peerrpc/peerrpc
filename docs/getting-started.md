@@ -194,15 +194,15 @@ let (resp, status) = client.invoke_unary("/echo.Echo/Echo", &req_bytes).await?;
 ## Running the Signal Server
 
 ```bash
-cd signal-server
-go run ./cmd/server -addr :8080
+cd peerrpc-go
+go run ./cmd/peerrpc signal -addr :8080
 ```
 
 ## Running the Relay
 
 ```bash
-cd relay-server
-go run ./cmd/server -room my-room -signal http://localhost:8080
+cd peerrpc-go
+go run ./cmd/peerrpc relay -service my-service -signal http://localhost:8080
 ```
 
 Without `-signal`, the relay uses in-process signaling (localhost demos only).
@@ -210,8 +210,8 @@ Without `-signal`, the relay uses in-process signaling (localhost demos only).
 ## Running the gRPC Bridge
 
 ```bash
-cd grpcbridge-server
-go run ./cmd/server \
+cd peerrpc-go
+go run ./cmd/peerrpc bridge \
     -room my-room \
     -upstream http://localhost:9090 \
     -service echo.Echo:Echo,Stream

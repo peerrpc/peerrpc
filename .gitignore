@@ -41,8 +41,7 @@ peerrpc-echo
 /peerrpc
 
 # Local binaries
-relay-server/server
-signal-server/serverbin/
+bin/
 
 # Example binaries (produced by `go run`/`go build` in examples/)
 examples/echo-server-go/peerrpc-echo-server

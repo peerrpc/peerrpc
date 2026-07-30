@@ -28,9 +28,9 @@ import (
 
 	"github.com/peerrpc/go/peer"
 	"github.com/peerrpc/go/rpc"
+	"github.com/peerrpc/go/signalserver"
+	"github.com/peerrpc/go/signalserver/store"
 	signalsdk "github.com/peerrpc/go/signal"
-	"github.com/peerrpc/signal-server/server"
-	"github.com/peerrpc/signal-server/store"
 )
 
 func main() {
@@ -141,7 +141,7 @@ func main() {
 	mem := store.NewMemory()
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
+	mux.Handle("/ws", signalserver.WebSocketHandler(mem, signalserver.Config{Logger: logger}))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

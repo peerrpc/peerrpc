@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/peerrpc/go/signal"
-	"github.com/peerrpc/signal-server/server"
-	"github.com/peerrpc/signal-server/store"
+	"github.com/peerrpc/go/signalserver"
+	"github.com/peerrpc/go/signalserver/store"
 )
 
 // TestInteropServer_ServesStaticAndSignal verifies the mux wires both
@@ -32,7 +32,7 @@ func TestInteropServer_ServesStaticAndSignal(t *testing.T) {
 	mem := store.NewMemory()
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{}))
+	mux.Handle("/ws", signalserver.WebSocketHandler(mem, signalserver.Config{}))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -78,7 +78,7 @@ func TestInteropServer_SignalingExchange(t *testing.T) {
 	mem := store.NewMemory()
 
 	mux := http.NewServeMux()
-	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{}))
+	mux.Handle("/ws", signalserver.WebSocketHandler(mem, signalserver.Config{}))
 
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

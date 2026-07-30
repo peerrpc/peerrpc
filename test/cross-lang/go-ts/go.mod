@@ -2,10 +2,7 @@ module github.com/peerrpc/interop-ts
 
 go 1.25.0
 
-require (
-	github.com/peerrpc/go v0.0.0-00010101000000-000000000000
-	github.com/peerrpc/signal-server v0.0.0-00010101000000-000000000000
-)
+require github.com/peerrpc/go v0.0.0-00010101000000-000000000000
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
@@ -35,7 +32,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace (
-	github.com/peerrpc/go => ../../../peerrpc-go
-	github.com/peerrpc/signal-server => ../../../signal-server
-)
+replace github.com/peerrpc/go => ../../../peerrpc-go

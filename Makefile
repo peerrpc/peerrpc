@@ -40,9 +40,10 @@ test-vectors:
 
 test-all: test-go test-rs test-ts
 
-# Go: the main SDK (with -race) + the standalone server modules.
-# Examples are demo binaries with no tests, so they are skipped.
-GO_TEST_DIRS := peerrpc-go signal-server relay-server grpcbridge-server cmd/peerrpc
+# Go: the main SDK (library + cmd/peerrpc CLI). Examples are demo
+# binaries with no tests, so they are skipped. The cross-language
+# interop harness lives in its own module under test/cross-lang/go-ts.
+GO_TEST_DIRS := peerrpc-go test/cross-lang/go-ts
 
 test-go:
 	@for dir in $(GO_TEST_DIRS); do \
@@ -65,14 +66,14 @@ check-go:
 	cd peerrpc-go && $(GO) build ./... && $(GO) vet ./...
 
 build-peerrpc:
-	cd cmd/peerrpc && $(GO) build -o ../../peerrpc .
+	cd peerrpc-go && $(GO) build -o ../peerrpc ./cmd/peerrpc
 
 build-peerrpc-interop-ts:
 	cd test/cross-lang/go-ts && $(GO) build -o ../../peerrpc-interop-ts .
 
 tidy:
 	cd peerrpc-go && $(GO) mod tidy
-	cd cmd/peerrpc && $(GO) mod tidy
+	cd test/cross-lang/go-ts && $(GO) mod tidy
 
 # ── Build SDKs ────────────────────────────────────────────────────
 
@@ -99,7 +100,7 @@ SIGNAL_TLS  ?= 0
 ECHO_PORT   ?= 5173
 
 run-signal:
-	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) $(if $(filter 1,$(SIGNAL_TLS)),--auto-tls)
+	cd peerrpc-go && $(GO) run ./cmd/peerrpc signal --addr $(SIGNAL_ADDR) $(if $(filter 1,$(SIGNAL_TLS)),--auto-tls)
 
 run-echo-server-go:
 	cd examples/echo-server-go && $(GO) run .
