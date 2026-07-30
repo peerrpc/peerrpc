@@ -6,6 +6,7 @@ use peerrpc_rpc::WireTransport;
 use peerrpc_signal::{SdpAnswer, SdpOffer, Session, SignalBody, SignalMessage};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
+use webrtc::api::setting_engine::{SctpMaxMessageSize, SettingEngine};
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_gathering_state::RTCIceGatheringState;
@@ -56,9 +57,28 @@ impl Drop for Peer {
     }
 }
 
+/// Build a webrtc-rs API with the peerrpc-recommended SettingEngine.
+///
+/// The key knob is `sctp_max_message_size_can_send = Unbounded`. webrtc-rs
+/// computes the negotiated SCTP max-message-size as
+/// `min(remote_cap, can_send)`; the default `can_send` is 64 KiB, which
+/// caps the negotiation even when the remote SDP advertises 256 KiB
+/// (the munging in `munge_max_message_size`). Setting `can_send =
+/// Unbounded` (= 0) makes webrtc-rs pick the remote value directly, so
+/// when the peer's SDP carries `a=max-message-size:262144` the
+/// negotiation reaches 256 KiB. With pion (Go) the default is already
+/// 262144 so the negotiation reaches 256 KiB there too.
+fn build_api() -> webrtc::api::API {
+    let mut engine = SettingEngine::default();
+    engine.set_sctp_max_message_size_can_send(SctpMaxMessageSize::Unbounded);
+    webrtc::api::APIBuilder::new()
+        .with_setting_engine(engine)
+        .build()
+}
+
 impl Peer {
     pub async fn create_offer(cfg: RTCConfiguration) -> Result<(Self, String), PeerError> {
-        let api = webrtc::api::APIBuilder::new().build();
+        let api = build_api();
         let pc = Arc::new(api.new_peer_connection(cfg).await?);
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
@@ -100,7 +120,7 @@ impl Peer {
         cfg: RTCConfiguration,
         offer_sdp: String,
     ) -> Result<(Self, String), PeerError> {
-        let api = webrtc::api::APIBuilder::new().build();
+        let api = build_api();
         let pc = Arc::new(api.new_peer_connection(cfg).await?);
 
         let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
@@ -284,7 +304,7 @@ impl WireTransport for Peer {
         // Apply outbound backpressure before each write: if the SCTP
         // send buffer is above the high watermark, wait for it to drain
         // (or for the channel to close). Without this, a burst of large
-        // frames — e.g. a 1 MiB echo chunked into 4×255 KiB — overflows
+        // frames — e.g. a 1 MiB echo chunked into N frames — overflows
         // the buffer and webrtc-rs tears down the association.
         self.await_buffer_low(&dc).await?;
 
@@ -400,9 +420,10 @@ async fn wait_ice_complete(pc: &Arc<RTCPeerConnection>) {
 }
 
 /// The largest single RTCDataChannel.send() payload the peer should
-/// attempt, in bytes. Matches the transport chunk threshold so a
-/// chunked frame (256 KiB data + ~40 B envelope) fits.
-const ADVERTISED_MAX_MESSAGE_SIZE: u32 = 256 * 1024;
+/// attempt, in bytes. Matches peerrpc_protocol::MAX_FRAME_SIZE so a
+/// chunked frame (255 KiB data + ~40 B envelope) fits when both sides
+/// negotiate ≥256 KiB.
+const ADVERTISED_MAX_MESSAGE_SIZE: u32 = 262144;
 
 /// Inject `a=max-message-size` into the application media section of
 /// the SDP. webrtc-rs does not emit this attribute, so per RFC 8831 the
