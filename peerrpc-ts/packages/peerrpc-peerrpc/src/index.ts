@@ -194,28 +194,56 @@ export async function listen(target: string | Target, opts: ListenOptions = {}):
     }
   };
 
+  // Track active connections and the serve loop so close() can tear
+  // everything down instead of leaving live DataChannels open.
+  const activeConns = new Set<ServerConn>();
+  let closed = false;
+
   // The Listener object we hand back. accept() is exposed directly;
   // serve() loops over accept and runs a fresh rpc.Server per conn.
   // We use a self-reference so serve() can call accept() without
   // recursion gymnastics.
   const listener: Listener = {
-    accept: acceptOnce,
+    accept: async () => {
+      if (closed) {
+        throw new Error("peerrpc: listener closed");
+      }
+      const conn = await acceptOnce();
+      activeConns.add(conn);
+      return conn;
+    },
     serve: async (factory) => {
       // Sequential loop; concurrent Accept within one service races
       // on the store's broadcast-to-others semantics.
-      while (true) {
-        const conn = await acceptOnce();
+      while (!closed) {
+        let conn: ServerConn;
+        try {
+          conn = await acceptOnce();
+        } catch {
+          // acceptOnce rejects when the listener is closed (the
+          // underlying signal transport errors out). Stop the loop.
+          break;
+        }
+        activeConns.add(conn);
         const srv = factory();
-        // Run in the background; do not block the next Accept.
-        srv.serve(conn.channel).catch(() => { /* best-effort */ });
+        // Run in the background; do not block the next Accept. Remove
+        // the conn from the active set once serve returns (channel
+        // closed) so close() does not try to close it twice.
+        srv.serve(conn.channel).catch(() => { /* best-effort */ }).finally(() => {
+          activeConns.delete(conn);
+        });
       }
     },
     close: async () => {
-      // Nothing held persistently at the facade level; the
-      // local scheme has no resources, and network schemes are
-      // per-Accept. The hook exists so callers can swap in a
-      // multiplexed implementation later without changing client
-      // code.
+      if (closed) return;
+      closed = true;
+      // Tear down every live connection (peer + signal transport).
+      // This closes the DataChannel, which unblocks the client's
+      // recv() and surfaces the disconnect.
+      await Promise.all(
+        [...activeConns].map((conn) => conn.close().catch(() => { /* best-effort */ })),
+      );
+      activeConns.clear();
     },
   };
   return listener;
