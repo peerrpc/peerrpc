@@ -64,7 +64,9 @@ run-facades:
 
 # ── Cross-language samples ───────────────────────────────────────
 
+STATIC_DIR ?=
+
 run-interop-server:
-	cd test/cross-lang/go-ts && $(GO) run . -addr :3000 -auto-tls
+	cd test/cross-lang/go-ts && $(GO) run . -addr :3000 -auto-tls $(if $(STATIC_DIR),-static $(abspath $(STATIC_DIR)))
 
 run-sample: run-interop-server
