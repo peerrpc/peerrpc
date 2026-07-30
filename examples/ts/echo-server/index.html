@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeerRPC Echo Server</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+    h1 { font-size: 1.4em; }
+    .row { margin: 0.5em 0; }
+    button { padding: 0.3em 0.8em; }
+    #log { background: #f5f5f5; border: 1px solid #ddd; padding: 0.5em; height: 350px; overflow-y: auto; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; }
+    .info { color: #666; font-size: 0.85em; }
+    input { width: 300px; }
+    .status { font-weight: bold; }
+    .ok { color: green; }
+    .err { color: red; }
+  </style>
+</head>
+<body>
+  <h1>PeerRPC Echo Server (Browser)</h1>
+  <p class="info">
+    Listens as a PeerRPC server (Answerer) on a signal-server and serves
+    the <code>echo.Echo</code> service with all four RPC types.
+    Open the echo client page in another tab to issue calls.
+  </p>
+  <div class="row">
+    <label>Signal URL: <input id="signalUrl" value="https://localhost:8443" /></label>
+  </div>
+  <div class="row">
+    <label>Service: <input id="service" value="echo.Echo" /></label>
+  </div>
+  <div class="row">
+    <button id="listen">Start Listening</button>
+    <span id="status" class="status"></span>
+  </div>
+  <div id="log"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -124,25 +124,33 @@ func registerEcho(srv *rpc.Server) {
 }
 
 func main() {
-	signalAddr := flag.String("signal", "https://localhost:8443", "signal-server base URL")
+	signalAddr := flag.String("signal", "https://localhost:8443", "signal-server base URL (scheme required)")
 	service := flag.String("service", "echo.Echo", "rendezvous service key")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	target := fmt.Sprintf("peerrpc+connect://%s/%s", trimScheme(*signalAddr), *service)
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ln, err := peerrpc.Listen(ctx, target)
+	// Use the builder API so the signal-server URL keeps its scheme.
+	// The target URI form (peerrpc+connect://host/svc) strips the
+	// https:// prefix, and signal.NewRemote needs the full URL.
+	ln, err := peerrpc.ListenContext(ctx).
+		SignalAt(*signalAddr).
+		Service(*service).
+		Over(peerrpc.SchemeConnect).
+		Listen()
 	if err != nil {
 		logger.Error("Listen", "err", err)
 		os.Exit(1)
 	}
 	defer ln.Close()
 
-	logger.Info("echo server listening", "target", target)
+	logger.Info("echo server listening",
+		"signal", *signalAddr,
+		"service", *service,
+	)
 
 	if err := ln.Serve(ctx, func() *rpc.Server {
 		srv := rpc.NewServer()
@@ -152,15 +160,4 @@ func main() {
 		logger.Error("Serve", "err", err)
 		os.Exit(1)
 	}
-}
-
-// trimScheme strips an optional https:// or http:// prefix so the
-// target URL can use the host directly.
-func trimScheme(s string) string {
-	for _, p := range []string{"https://", "http://"} {
-		if len(s) > len(p) && s[:len(p)] == p {
-			return s[len(p):]
-		}
-	}
-	return s
 }

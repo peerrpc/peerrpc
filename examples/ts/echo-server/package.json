@@ -1,0 +1,18 @@
+{
+  "name": "peerrpc-echo-server-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@peerrpc/peerrpc": "file:../../../peerrpc-ts/packages/peerrpc-peerrpc",
+    "@peerrpc/rpc": "file:../../../peerrpc-ts/packages/peerrpc-rpc"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "typescript": "^5.6.0"
+  }
+}

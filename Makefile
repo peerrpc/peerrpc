@@ -5,7 +5,7 @@ CARGO ?= cargo
 
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
-.PHONY: run-signal run-ts-echo run-echo-server run-echo
+.PHONY: run-signal run-ts-echo run-echo-server run-ts-echo-server run-echo
 .PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-echo-rs
 .PHONY: run-interop-server run-interop-rs run-interop-e2e run-sample
@@ -68,11 +68,14 @@ run-echo-server:
 run-ts-echo:
 	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
+run-ts-echo-server:
+	cd examples/ts/echo-server && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
+
 # Convenience: prints instructions for the three-terminal quick start.
 run-echo:
 	@echo "Run each in a separate terminal:"
 	@echo "  make run-signal"
-	@echo "  make run-echo-server"
+	@echo "  make run-echo-server   (Go)  or  make run-ts-echo-server  (browser)"
 	@echo "  make run-ts-echo"
 	@echo ""
 	@echo "Then open the Vite URL, accept the cert warning at"
