@@ -8,7 +8,7 @@ CARGO ?= cargo
 .PHONY: test-all test-go test-rs test-ts
 
 # Quick-start targets (signal-server + echo server + browser client).
-.PHONY: run-signal run-echo run-echo-server run-echo-server-ts run-echo-ts run-echo-react
+.PHONY: run-signal run-echo run-echo-server-go run-echo-server-rs run-echo-server-ts run-echo-ts run-echo-react
 
 # Local (single-process, no signal-server) demos.
 .PHONY: run-local-echo-go run-local-echo-rs run-local-facade-go run-local-facade-rs run-local-facades
@@ -86,9 +86,10 @@ build-rs:
 # ── Quick start: signal-server + echo server + browser client ───
 #
 # Run each in a separate terminal:
-#   make run-signal       # signal-server (WebSocket; cleartext ws://)
-#   make run-echo-server  # Go echo RPC server (all 4 types)
-#   make run-echo-ts      # Vite dev server for the browser echo page
+#   make run-signal          # signal-server (WebSocket; cleartext ws://)
+#   make run-echo-server-go  # Go echo RPC server (all RPC types)
+#   make run-echo-server-rs  # Rust echo RPC server (Unary + Server-Stream)
+#   make run-echo-ts         # Vite dev server for the browser echo page
 #
 # Then open the printed Vite URL and click "Connect". For a TLS setup
 # (wss://) pass SIGNAL_TLS=1 and accept the self-signed cert first.
@@ -100,8 +101,11 @@ ECHO_PORT   ?= 5173
 run-signal:
 	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) $(if $(filter 1,$(SIGNAL_TLS)),--auto-tls)
 
-run-echo-server:
+run-echo-server-go:
 	cd examples/echo-server-go && $(GO) run .
+
+run-echo-server-rs:
+	$(CARGO) run --manifest-path examples/echo-server-rs/Cargo.toml
 
 run-echo-ts:
 	cd examples/echo-ts && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
@@ -116,7 +120,8 @@ run-echo-server-ts:
 run-echo:
 	@echo "Run each in a separate terminal:"
 	@echo "  make run-signal"
-	@echo "  make run-echo-server   (Go)  or  make run-echo-server-ts  (browser)"
+	@echo "  make run-echo-server-go  (Go)   or  make run-echo-server-rs  (Rust)"
+	@echo "                          or  make run-echo-server-ts  (browser)"
 	@echo "  make run-echo-ts       (vanilla TS)  or  make run-echo-react  (React)"
 	@echo ""
 	@echo "Then open the Vite URL and click Connect. No TLS setup needed"

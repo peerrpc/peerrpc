@@ -24,6 +24,19 @@ pub mod remote;
 #[doc(inline)]
 pub use remote::Remote;
 
+/// WebSocket backend (tokio-tungstenite client for a ws-only
+/// signal-server).
+///
+/// Behind the `ws` feature (default-on). This is the backend that
+/// matches the current signal-server deployment.
+#[cfg(feature = "ws")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ws")))]
+pub mod ws;
+
+#[cfg(feature = "ws")]
+#[doc(inline)]
+pub use ws::WS;
+
 // ─── Wire types ─────────────────────────────────────────────
 
 /// Per-message signaling envelope. The rendezvous key is `service`.
