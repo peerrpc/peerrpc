@@ -105,7 +105,7 @@ func main() {
 	// 2. Wire signaling + PeerConnection.
 	var backend signalsdk.Backend
 	if *signalAddr != "" {
-		backend = signalsdk.NewRemote(*signalAddr)
+		backend = signalsdk.NewWS(*signalAddr)
 		logger.Info("using remote signaling", "addr", *signalAddr)
 	} else {
 		backend = signalsdk.NewLocal()

@@ -26,16 +26,11 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	"github.com/peerrpc/go/peer"
 	"github.com/peerrpc/go/rpc"
 	signalsdk "github.com/peerrpc/go/signal"
 	"github.com/peerrpc/signal-server/server"
 	"github.com/peerrpc/signal-server/store"
-
-	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 func main() {
@@ -137,11 +132,16 @@ func main() {
 	})
 
 	// 3. HTTP mux: signaling service + static files + health.
-	signalSrv := server.New(store.NewMemory(), server.Config{Logger: logger})
+	// 3. HTTP mux: WebSocket signaling + static files + health.
+	//
+	// The signaling service is served exclusively over WebSocket; the
+	// browser connects via WebSocketSignal and the offerer (below) uses
+	// the in-process Local backend via the SSE hub. The /ws endpoint is
+	// available for any peer that wants to join over the network.
+	mem := store.NewMemory()
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(signalSrv)
-	mux.Handle(path, handler)
+	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -181,13 +181,11 @@ func main() {
 		logger.Info("auto-TLS: generated ephemeral self-signed certificate")
 	}
 
-	// 5. Start HTTP server. Connect bidi streaming requires HTTP/2;
-	//    Chrome only does HTTP/2 over TLS, so use ListenAndServeTLS
-	//    when cert+key are provided. Otherwise fall back to h2c (works
-	//    for non-browser clients like connect-go).
+	// 5. Start HTTP server. WebSocket upgrades work over plain HTTP/1.1,
+	//    so no h2c is needed. TLS still enables wss:// for browsers.
 	httpSrv := &http.Server{
 		Addr:    *addr,
-		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		Handler: mux,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -283,6 +281,3 @@ func randomID() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
-
-// touch unused import
-var _ = connect.NewError

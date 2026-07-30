@@ -7,8 +7,8 @@
 // the WebRTC data path: any rendezvous mechanism works.
 //
 // The package ships an in-process backend (`Local`) suitable for
-// tests and single-binary demos, and a connect-go network backend
-// (`Remote`) that speaks the signaling wire format (service /
+// tests and single-binary demos, and a WebSocket network backend
+// (`WS`) that speaks the signaling wire format (service /
 // AnnounceRequest) to a remote signal-server.
 package signal
 

@@ -29,8 +29,8 @@ export interface SignalMessage {
  * SDP / ICE candidates. The caller implements send + onMessage.
  *
  * Typical implementations:
- *   - connect-web client pointing at signal-server
- *   - WebSocket for custom signaling
+ *   - WebSocket client (WebSocketSignal) pointing at signal-server
+ *   - a custom in-process transport for tests
  *   - in-memory for tests
  */
 export interface SignalTransport {

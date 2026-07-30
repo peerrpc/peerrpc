@@ -34,7 +34,7 @@ func Dial(ctx context.Context, target string, opts ...DialOption) (*Conn, error)
 // constructs the Target programmatically.
 //
 //	conn, err := peerrpc.DialTarget(ctx, peerrpc.Target{
-//	    Scheme:  peerrpc.SchemeConnect,
+//	    Scheme:  peerrpc.SchemeWS,
 //	    Signal:  "signal.example.com",
 //	    Service: "echo.Echo",
 //	})

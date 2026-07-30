@@ -16,11 +16,11 @@ func TestParseTarget_Basic(t *testing.T) {
 		want peerrpc.Target
 	}{
 		{
-			name: "connect with port and query",
-			in:   "peerrpc+connect://signal.example.com:443/echo.Echo?as=client&peer=alice&token=jwt",
+			name: "ws with port and query",
+			in:   "peerrpc+ws://signal.example.com:8443/echo.Echo?as=client&peer=alice&token=jwt",
 			want: peerrpc.Target{
-				Scheme:  peerrpc.SchemeConnect,
-				Signal:  "signal.example.com:443",
+				Scheme:  peerrpc.SchemeWS,
+				Signal:  "signal.example.com:8443",
 				Service: "echo.Echo",
 				Role:    peerrpc.RoleHintClient,
 				PeerID:  "alice",
@@ -47,9 +47,9 @@ func TestParseTarget_Basic(t *testing.T) {
 		},
 		{
 			name: "bare host no port",
-			in:   "peerrpc+connect://signal.example.com/echo.Echo",
+			in:   "peerrpc+ws://signal.example.com/echo.Echo",
 			want: peerrpc.Target{
-				Scheme:  peerrpc.SchemeConnect,
+				Scheme:  peerrpc.SchemeWS,
 				Signal:  "signal.example.com",
 				Service: "echo.Echo",
 			},
@@ -73,11 +73,11 @@ func TestParseTarget_Errors(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"missing prefix", "connect://signal.example.com/echo.Echo"},
-		{"missing service", "peerrpc+connect://signal.example.com"},
-		{"empty service", "peerrpc+connect://signal.example.com/"},
-		{"non-local without authority", "peerrpc+connect:///echo.Echo"},
-		{"garbage url", "peerrpc+connect://%%illegal"},
+		{"missing prefix", "ws://signal.example.com/echo.Echo"},
+		{"missing service", "peerrpc+ws://signal.example.com"},
+		{"empty service", "peerrpc+ws://signal.example.com/"},
+		{"non-local without authority", "peerrpc+ws:///echo.Echo"},
+		{"garbage url", "peerrpc+ws://%%illegal"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -90,8 +90,8 @@ func TestParseTarget_Errors(t *testing.T) {
 
 func TestTarget_StringRoundTrip(t *testing.T) {
 	original := peerrpc.Target{
-		Scheme:  peerrpc.SchemeConnect,
-		Signal:  "signal.example.com:443",
+		Scheme:  peerrpc.SchemeWS,
+		Signal:  "signal.example.com:8443",
 		Service: "echo.Echo",
 		Role:    peerrpc.RoleHintClient,
 		PeerID:  "alice",

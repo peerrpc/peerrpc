@@ -12,7 +12,7 @@ import (
 // Resolver turns a Target into an open signaling Session. The
 // interface mirrors gRPC's resolver.Resolver: dialing is decoupled
 // from how the address was obtained, so different schemes (local,
-// connect, ws, relay, future xds) plug in behind the same Dial /
+// ws, relay, future xds) plug in behind the same Dial /
 // Listen entry points.
 //
 // Resolution does NOT include the WebRTC dial. It returns a Session
@@ -50,10 +50,9 @@ type Resolution struct {
 }
 
 // ErrUnsupportedScheme is returned by Resolve when no resolver has
-// been registered for the requested scheme. The schemes
-// SchemeConnect and SchemeLocal are always available; SchemeWS and
-// SchemeRelay need explicit registration (and the Go SDK does not
-// ship a WS client resolver — see NewWSResolver).
+// been registered for the requested scheme. The schemes SchemeWS and
+// SchemeLocal are always available; SchemeRelay needs explicit
+// registration.
 var ErrUnsupportedScheme = errors.New("peerrpc: unsupported scheme; register one with peerrpc.RegisterResolver")
 
 // resolverRegistry maps scheme → Resolver factory. A factory is
@@ -76,8 +75,8 @@ var defaultRegistry = resolverRegistry{
 // RegisterResolver associates scheme with factory. Subsequent calls
 // to Resolve / Dial / Listen with that scheme will dispatch through
 // factory. Registering the same scheme twice replaces the previous
-// registration. Built-in schemes (local, connect) are pre-registered
-// at package init; callers may override them.
+// registration. Built-in schemes (local, ws) are pre-registered at
+// package init; callers may override them.
 //
 // RegisterResolver is safe for concurrent use.
 func RegisterResolver(scheme Scheme, factory ResolverFactory) {
@@ -130,10 +129,10 @@ func init() {
 		})
 		return &localResolver{backend: localBackend}, nil
 	})
-	RegisterResolver(SchemeConnect, func() (Resolver, error) {
-		// A new Remote backend is constructed per-Resolve because the
-		// URL is Target-specific. The connect client is cheap to
-		// construct; pooling is a future optimization.
-		return &connectResolver{}, nil
+	RegisterResolver(SchemeWS, func() (Resolver, error) {
+		// A new WS backend is constructed per-Resolve because the URL
+		// is Target-specific. The WS client is cheap to construct;
+		// pooling is a future optimization.
+		return &wsResolver{}, nil
 	})
 }

@@ -11,7 +11,7 @@ import (
 //	conn, err := peerrpc.DialContext(ctx).
 //	    SignalAt("signal.example.com").
 //	    Service("echo.Echo").
-//	    Over(peerrpc.SchemeConnect).
+//	    Over(peerrpc.SchemeWS).
 //	    WithToken(jwt).
 //	    Connect()
 //
@@ -43,7 +43,7 @@ func (b *DialBuilder) Service(name string) *DialBuilder {
 	return b
 }
 
-// Over sets Target.Scheme. Defaults to SchemeConnect if unset.
+// Over sets Target.Scheme. Defaults to SchemeWS if unset.
 func (b *DialBuilder) Over(s Scheme) *DialBuilder {
 	b.target.Scheme = s
 	return b
@@ -92,7 +92,7 @@ func (b *DialBuilder) Apply(opts ...DialOption) *DialBuilder {
 // same errors DialTarget does.
 func (b *DialBuilder) Connect() (*Conn, error) {
 	if b.target.Scheme == "" {
-		b.target.Scheme = SchemeConnect
+		b.target.Scheme = SchemeWS
 	}
 	return DialTarget(b.ctx, b.target, b.opts...)
 }

@@ -46,7 +46,7 @@ type Config struct {
 	Peer peer.Config
 
 	// Signaling is the backend the relay uses to rendezvous with
-	// peers. In production this is a connect-go client pointing at
+	// peers. In production this is a WebSocket client pointing at
 	// the standalone signal-server binary.
 	Signaling signal.Backend
 

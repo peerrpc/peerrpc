@@ -10,7 +10,7 @@ import (
 //	ln, err := peerrpc.ListenContext(ctx).
 //	    SignalAt("signal.example.com").
 //	    Service("echo.Echo").
-//	    Over(peerrpc.SchemeConnect).
+//	    Over(peerrpc.SchemeWS).
 //	    WithToken(jwt).
 //	    Listen()
 type ListenBuilder struct {
@@ -36,7 +36,7 @@ func (b *ListenBuilder) Service(name string) *ListenBuilder {
 	return b
 }
 
-// Over sets Target.Scheme. Defaults to SchemeConnect if unset.
+// Over sets Target.Scheme. Defaults to SchemeWS if unset.
 func (b *ListenBuilder) Over(s Scheme) *ListenBuilder {
 	b.target.Scheme = s
 	return b
@@ -83,7 +83,7 @@ func (b *ListenBuilder) Apply(opts ...ListenOption) *ListenBuilder {
 // Listen finalizes the builder and runs ListenTarget.
 func (b *ListenBuilder) Listen() (*Listener, error) {
 	if b.target.Scheme == "" {
-		b.target.Scheme = SchemeConnect
+		b.target.Scheme = SchemeWS
 	}
 	return ListenTarget(b.ctx, b.target, b.opts...)
 }

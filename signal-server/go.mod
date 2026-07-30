@@ -3,11 +3,9 @@ module github.com/peerrpc/signal-server
 go 1.25.0
 
 require (
-	connectrpc.com/connect v1.20.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/peerrpc/go v0.0.0-00010101000000-000000000000
 	github.com/prometheus/client_golang v1.24.1
-	golang.org/x/net v0.57.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -43,8 +41,8 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260727163830-6c54dddc4772 // indirect
 )

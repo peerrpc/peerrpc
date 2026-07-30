@@ -7,8 +7,7 @@
  *
  * scheme:
  *   local    → in-process signaling (no network)
- *   connect  → Connect-RPC over HTTP/2 (Node / non-browser)
- *   ws       → WebSocket (browser)
+ *   ws       → WebSocket (the network signaling transport)
  *   relay    → explicit relay hop (not yet implemented)
  *
  * authority: signal-server host (ignored for local).
@@ -20,7 +19,7 @@
  *   ?token=<jwt>        bearer token
  */
 
-export type Scheme = "local" | "connect" | "ws" | "relay";
+export type Scheme = "local" | "ws" | "relay";
 
 export type RoleHint = "client" | "server";
 
@@ -49,7 +48,7 @@ export function parseTarget(uri: string): Target {
       `target URI must start with ${JSON.stringify(prefix)}, got ${JSON.stringify(uri)}`,
     );
   }
-  const rest = uri.slice(prefix.length); // "connect://host/service?..."
+  const rest = uri.slice(prefix.length); // "ws://host/service?..."
 
   const schemeSep = "://";
   const sepIdx = rest.indexOf(schemeSep);
@@ -114,7 +113,7 @@ export function parseTarget(uri: string): Target {
 }
 
 function isScheme(s: string): s is Scheme {
-  return s === "local" || s === "connect" || s === "ws" || s === "relay";
+  return s === "local" || s === "ws" || s === "relay";
 }
 
 /** Render a Target back to its canonical URI form. */

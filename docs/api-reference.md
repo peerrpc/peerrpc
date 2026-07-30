@@ -46,7 +46,7 @@ WebRTC PeerConnection lifecycle.
 Pluggable signaling backends.
 
 - `NewLocal() *Local` -- in-process backend for tests/demos.
-- `NewRemote(baseURL string, opts ...connect.ClientOption) *Remote` -- connect-go client.
+- `NewWS(baseURL string, opts ...WSOption) *WS` -- WebSocket client (the network backend).
 - `Backend` interface: `Exchange(ctx, roomID, peerID) (*Session, error)`
 - `(*Session).Send(ctx, *SignalMessage) error`
 - `(*Session).Receive() <-chan *SignalMessage`

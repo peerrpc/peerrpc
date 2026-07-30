@@ -4,8 +4,8 @@
 // is self-contained for browser dev: no openssl, no cert files, no
 // mkcert CA install. The cert is valid for localhost + 127.0.0.1 +
 // ::1 and lasts 24 hours. Browsers will show a security warning that
-// the user must accept (or trust) before connect-web can reach the
-// signaling endpoint.
+// the user must accept (or trust) before the WebSocket (wss://) can
+// reach the signaling endpoint.
 package main
 
 import (

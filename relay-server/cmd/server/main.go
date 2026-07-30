@@ -53,7 +53,7 @@ func main() {
 	// Select signaling backend: remote if -signal is given, else in-process.
 	var backend signalsdk.Backend
 	if *signalAddr != "" {
-		backend = signalsdk.NewRemote(*signalAddr)
+		backend = signalsdk.NewWS(*signalAddr)
 		logger.Info("using remote signaling", "addr", *signalAddr)
 	} else {
 		backend = signalsdk.NewLocal()

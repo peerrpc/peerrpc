@@ -28,6 +28,10 @@ export interface WebSocketSignalConfig {
   role?: AnnounceRequest_Role;
   /** Optional Ed25519 public key. */
   peerPubkey?: Uint8Array;
+  /** Optional bearer token. Sent as a ?token= query param on the
+   *  WebSocket URL; the server validates it before accepting the
+   *  handshake. */
+  token?: string;
 }
 
 export class WebSocketSignal {
@@ -40,7 +44,12 @@ export class WebSocketSignal {
   }
 
   async connect(): Promise<void> {
-    const ws = new WebSocket(this.cfg.url);
+    // Append the token (if any) as a ?token= query param. The server's
+    // WS auth reads it from the handshake request.
+    const wsURL = this.cfg.token
+      ? appendToken(this.cfg.url, this.cfg.token)
+      : this.cfg.url;
+    const ws = new WebSocket(wsURL);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
@@ -164,6 +173,13 @@ function translateIncoming(wire: WireSignalMessage): SignalMessage | null {
     default:
       return null;
   }
+}
+
+// ----- token query-param helper -----
+
+function appendToken(url: string, token: string): string {
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
 }
 
 // ----- length-prefixed protobuf framing (4-byte BE length) -----

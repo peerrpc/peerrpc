@@ -52,8 +52,8 @@ export type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
  * connection progresses through idle → connecting → connected.
  *
  * The caller MUST provide a `createSignal` factory that returns a
- * SignalTransport implementation (e.g. ConnectSignal wrapping a
- * signal-server URL, or a custom WebSocket transport).
+ * SignalTransport implementation (e.g. WebSocketSignal wrapping a
+ * signal-server URL, or a custom in-process transport).
  *
  * On unmount the hook automatically calls disconnect().
  */

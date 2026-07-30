@@ -11,15 +11,14 @@
  * Mirrors the Go peerrpc package: three entry styles (URL / Target /
  * Builder) all funnel into one dialTarget / listenTarget core.
  *
- * On the browser, dial defaults to the ws scheme if a host authority
- * is provided; on Node it defaults to connect. The local scheme is
- * always available for tests and single-binary demos.
+ * The local scheme is available for tests and single-binary demos;
+ * the ws scheme is the network signaling transport (works from both
+ * browsers and Node).
  */
 
 import { type SignalTransport, dial as peerDial, accept as peerAccept, type PeerConfig } from "@peerrpc/peer";
 import { Client, Server, ServerStream, MethodKind, ok, err, type ServiceDesc, type Handler, type Status } from "@peerrpc/rpc";
 import type { Channel } from "@peerrpc/transport";
-import { ConnectSignal } from "@peerrpc/signal";
 import { WebSocketSignal } from "@peerrpc/signal";
 import { localBus } from "./local_bus.js";
 import { parseTarget, formatTarget, type Target, type Scheme, type RoleHint, TargetParseError } from "./target.js";
@@ -60,18 +59,6 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
       const joined = localBus.join(target.service, peerId);
       return { transport: joined.transport, close: () => joined.leave() };
     }
-    case "connect": {
-      const sig = new ConnectSignal({
-        url: target.signal.startsWith("http") ? target.signal : `https://${target.signal}`,
-        service: target.service,
-        peerId,
-        token: target.token,
-      });
-      return {
-        transport: sig,
-        close: () => sig.close(),
-      };
-    }
     case "ws": {
       // Default to cleartext ws:// for loopback hosts (dev convenience:
       // avoids the self-signed cert dance) and wss:// elsewhere. Callers
@@ -87,6 +74,7 @@ function buildSignalTransport(target: Target): { transport: SignalTransport; clo
         url,
         service: target.service,
         peerId,
+        ...(target.token ? { token: target.token } : {}),
       });
       return {
         transport: sig,
@@ -265,8 +253,8 @@ function applyOpts(t: Target, opts: DialOptions | ListenOptions): void {
 
 async function maybeConnectSignal(transport: SignalTransport): Promise<void> {
   // The local scheme's transport is already "connected" (in-process).
-  // The network schemes (ConnectSignal, WebSocketSignal) expose
-  // connect() via duck-typing.
+  // The network scheme (WebSocketSignal) exposes connect() via
+  // duck-typing.
   const maybe = transport as unknown as { connect?: () => Promise<void> };
   if (typeof maybe.connect === "function") {
     await maybe.connect();

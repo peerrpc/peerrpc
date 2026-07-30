@@ -3,14 +3,13 @@ module github.com/peerrpc/interop-ts
 go 1.25.0
 
 require (
-	connectrpc.com/connect v1.20.0
 	github.com/peerrpc/go v0.0.0-00010101000000-000000000000
 	github.com/peerrpc/signal-server v0.0.0-00010101000000-000000000000
-	golang.org/x/net v0.57.0
 )
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
 	github.com/pion/ice/v4 v4.4.0 // indirect
@@ -29,8 +28,8 @@ require (
 	github.com/pion/webrtc/v4 v4.2.18 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260727163830-6c54dddc4772 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect

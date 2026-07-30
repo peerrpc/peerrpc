@@ -1,7 +1,7 @@
 /**
  * PeerRPC browser echo demo.
  *
- * Connects to a signal-server via the Connect scheme and exercises
+ * Connects to a signal-server over WebSocket and exercises
  * all four RPC types (Unary / Server-Streaming / Client-Streaming /
  * Bidi) against the echo.Echo service registered by the Go interop
  * server or any compatible PeerRPC server.

@@ -1,6 +1,6 @@
 // Command peerrpc-echo-server is a PeerRPC server that connects to a
-// standalone signal-server via the Connect scheme and serves the
-// echo.Echo service with all four RPC types (Unary / Server-Streaming /
+// standalone signal-server over WebSocket and serves the echo.Echo
+// service with all four RPC types (Unary / Server-Streaming /
 // Client-Streaming / Bidi).
 //
 // It is the server counterpart to examples/ts/echo (the browser client).
@@ -124,7 +124,7 @@ func registerEcho(srv *rpc.Server) {
 }
 
 func main() {
-	signalAddr := flag.String("signal", "http://localhost:8443", "signal-server base URL (scheme required)")
+	signalAddr := flag.String("signal", "ws://localhost:8443", "signal-server base URL (ws:// or wss:// required)")
 	service := flag.String("service", "echo.Echo", "rendezvous service key")
 	flag.Parse()
 
@@ -133,13 +133,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Use the builder API so the signal-server URL keeps its scheme.
-	// The target URI form (peerrpc+connect://host/svc) strips the
-	// https:// prefix, and signal.NewRemote needs the full URL.
+	// Use the builder API. The signal-server URL keeps its scheme;
+	// signal.NewWS accepts ws:// or wss:// (and rewrites http(s)://).
 	ln, err := peerrpc.ListenContext(ctx).
 		SignalAt(*signalAddr).
 		Service(*service).
-		Over(peerrpc.SchemeConnect).
+		Over(peerrpc.SchemeWS).
 		Listen()
 	if err != nil {
 		logger.Error("Listen", "err", err)

@@ -7,7 +7,7 @@
 // # Quickstart (URL style)
 //
 //	conn, err := peerrpc.Dial(ctx,
-//	    "peerrpc+connect://signal.example.com/echo.Echo",
+//	    "peerrpc+ws://signal.example.com/echo.Echo",
 //	    peerrpc.WithToken(jwt),
 //	)
 //	defer conn.Close()
@@ -16,7 +16,7 @@
 // # Quickstart (Target style)
 //
 //	conn, err := peerrpc.DialTarget(ctx, peerrpc.Target{
-//	    Scheme:  peerrpc.SchemeConnect,
+//	    Scheme:  peerrpc.SchemeWS,
 //	    Signal:  "signal.example.com",
 //	    Service: "echo.Echo",
 //	}, peerrpc.WithToken(jwt))
@@ -26,7 +26,7 @@
 //	conn, err := peerrpc.DialContext(ctx).
 //	    SignalAt("signal.example.com").
 //	    Service("echo.Echo").
-//	    Over(peerrpc.SchemeConnect).
+//	    Over(peerrpc.SchemeWS).
 //	    Connect()
 //
 // # Target URI grammar
@@ -35,8 +35,7 @@
 //
 //	scheme:
 //	  local    → in-process signal backend (signal.Local); authority is ignored
-//	  connect  → Connect-RPC over HTTP/2 (signal.Remote); the default for Go clients
-//	  ws       → WebSocket (browser-side; Go clients must use connect)
+//	  ws       → WebSocket (signal.WS); the default for Go clients
 //	  relay    → explicit relay hop (not yet implemented in Go)
 //
 //	authority:  signal-server host; ignored for local
@@ -69,16 +68,10 @@ const (
 	// (authority) field is ignored.
 	SchemeLocal Scheme = "local"
 
-	// SchemeConnect routes through signal.Remote, the connect-go
-	// client. Works over HTTP/2 (cleartext h2c or TLS). This is the
-	// default for Go clients.
-	SchemeConnect Scheme = "connect"
-
-	// SchemeWS routes through a WebSocket signaling client. Browsers
-	// need this because they cannot speak Connect/gRPC bidi streams
-	// without HTTP/2 + TLS. Go clients should use SchemeConnect
-	// instead; registering a Go WS resolver returns
-	// ErrUnsupportedScheme.
+	// SchemeWS routes through signal.WS, the WebSocket client. Works
+	// over ws:// (cleartext) or wss:// (TLS). This is the default for
+	// Go clients and the only network signaling transport shipped by
+	// the Go SDK.
 	SchemeWS Scheme = "ws"
 
 	// SchemeRelay routes through an explicit relay hop. Not yet implemented.
@@ -160,17 +153,17 @@ func (t Target) String() string {
 
 // ParseTarget parses a Target URI into a Target. Accepted forms:
 //
-//	peerrpc+connect://signal.example.com/echo.Echo
-//	peerrpc+connect://signal.example.com:443/echo.Echo?as=client&peer=alice
+//	peerrpc+ws://signal.example.com/echo.Echo
+//	peerrpc+ws://signal.example.com:8443/echo.Echo?as=client&peer=alice
 //	peerrpc+local:///echo.Echo                              (empty authority)
 //	peerrpc+ws://signal.example.com/echo.Echo
 //
 // The leading "peerrpc+" prefix is REQUIRED; bare schemes such as
-// "connect://..." are rejected to keep the namespace unambiguous.
+// "ws://..." are rejected to keep the namespace unambiguous.
 //
 // We avoid net/url here because it treats the embedded inner scheme
-// (e.g. "connect") as part of the URL scheme and the signal host as
-// the path, which would mangle signal.example.com:443. A manual
+// (e.g. "ws") as part of the URL scheme and the signal host as
+// the path, which would mangle signal.example.com:8443. A manual
 // split keeps the grammar in this package and is straightforward.
 func ParseTarget(uri string) (Target, error) {
 	const prefix = "peerrpc+"

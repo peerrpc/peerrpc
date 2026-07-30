@@ -43,7 +43,7 @@ func runRelay(_ *cobra.Command, _ []string) error {
 
 	var backend signalsdk.Backend
 	if relayFlags.signalAddr != "" {
-		backend = signalsdk.NewRemote(relayFlags.signalAddr)
+		backend = signalsdk.NewWS(relayFlags.signalAddr)
 		logger.Info("using remote signaling", "addr", relayFlags.signalAddr)
 	} else {
 		backend = signalsdk.NewLocal()

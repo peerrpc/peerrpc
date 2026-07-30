@@ -1,12 +1,9 @@
-// WebSocket signaling endpoint for browsers.
+// WebSocket signaling endpoint.
 //
-// connect-web cannot do bidirectional streaming from a browser (the
-// fetch API lacks streaming request bodies), so the SignalingService.
-// Exchange bidi stream is unreachable from browser clients. This
-// handler exposes the same signaling semantics over a WebSocket: each
+// The signaling service is served exclusively over WebSocket. Each
 // frame is a 4-byte big-endian length prefix + a marshaled
-// peerrpc.signaling.SignalMessage, matching the TS WebSocketSignal
-// client.
+// peerrpc.signaling.SignalMessage, matching the WebSocketSignal
+// client (and the Go signal.WS backend).
 //
 // Wire protocol:
 //   1. Client opens wss://host/ws (or ws:// for cleartext).
@@ -16,6 +13,11 @@
 //      frames to the other peers in the same service.
 //   4. Server pushes frames received from other peers back over the
 //      WebSocket until either side closes.
+//
+// Auth (when a Validator is configured) is enforced BEFORE the
+// upgrade: the token is read from the Authorization header or the
+// "token" query parameter; an invalid token yields a 401 and no
+// WebSocket is opened.
 package server
 
 import (
@@ -27,6 +29,7 @@ import (
 	"net/http"
 
 	signalingpb "github.com/peerrpc/go/gen/proto/peerrpc/signaling"
+	"github.com/peerrpc/signal-server/auth"
 	"github.com/peerrpc/signal-server/store"
 
 	"github.com/gorilla/websocket"
@@ -36,21 +39,33 @@ import (
 var upgrader = websocket.Upgrader{
 	// Browsers connect from a different origin (the Vite dev server),
 	// so allow all origins for the signaling endpoint. Auth (when
-	// configured) is enforced via the bearer token query param.
+	// configured) is enforced by the Validator before the upgrade.
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
+// Config carries the handler tuning knobs.
+type Config struct {
+	// Logger receives structured events (peer announce/leave, errors).
+	// Defaults to slog.Default().
+	Logger *slog.Logger
+
+	// Validator, when non-nil, gates the WebSocket handshake on a
+	// valid bearer token (Authorization header or ?token= query).
+	Validator auth.TokenValidator
+}
+
 // WebSocketHandler returns an http.HandlerFunc that serves the
-// signaling protocol over WebSocket on top of the given store. It
-// mirrors Handler.Exchange but over a raw WebSocket instead of a
-// connect bidi stream, so browser clients (which cannot do Connect
-// bidi) can still signal.
+// signaling protocol over WebSocket on top of the given store.
 func WebSocketHandler(s store.Store, cfg Config) http.HandlerFunc {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := auth.AuthorizeRequest(w, r, cfg.Validator); !ok {
+			// AuthorizeRequest already wrote a 401 response.
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			logger.Warn("ws upgrade", "err", err)

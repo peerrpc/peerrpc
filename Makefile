@@ -86,7 +86,7 @@ build-rs:
 # ── Quick start: signal-server + echo server + browser client ───
 #
 # Run each in a separate terminal:
-#   make run-signal       # signal-server (cleartext h2c; no TLS setup)
+#   make run-signal       # signal-server (WebSocket; cleartext ws://)
 #   make run-echo-server  # Go echo RPC server (all 4 types)
 #   make run-echo-ts      # Vite dev server for the browser echo page
 #

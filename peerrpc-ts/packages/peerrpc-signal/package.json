@@ -5,7 +5,6 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@peerrpc/protocol": "*",
-    "@connectrpc/connect-web": "^1.4.0"
+    "@peerrpc/protocol": "*"
   }
 }

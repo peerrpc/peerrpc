@@ -34,14 +34,14 @@ func (r *localResolver) Resolve(ctx context.Context, target Target) (*Resolution
 	}, nil
 }
 
-// connectResolver routes through signal.Remote (connect-go client).
-// Each Resolve constructs a fresh Remote because the base URL is
-// Target-specific; this keeps Resolver stateless and the connect
-// client is cheap to instantiate.
-type connectResolver struct{}
+// wsResolver routes through signal.WS (the WebSocket client). Each
+// Resolve constructs a fresh WS backend because the base URL is
+// Target-specific; this keeps Resolver stateless and the WS client
+// is cheap to instantiate.
+type wsResolver struct{}
 
 // Resolve implements Resolver.
-func (r *connectResolver) Resolve(ctx context.Context, target Target) (*Resolution, error) {
+func (r *wsResolver) Resolve(ctx context.Context, target Target) (*Resolution, error) {
 	if target.Signal == "" {
 		return nil, fmt.Errorf("peerrpc: scheme %q requires a non-empty Target.Signal", target.Scheme)
 	}
@@ -49,10 +49,14 @@ func (r *connectResolver) Resolve(ctx context.Context, target Target) (*Resoluti
 	if peerID == "" {
 		peerID = uuid.NewString()
 	}
-	backend := signal.NewRemote(target.Signal)
+	var opts []signal.WSOption
+	if target.Token != "" {
+		opts = append(opts, signal.WithToken(target.Token))
+	}
+	backend := signal.NewWS(target.Signal, opts...)
 	session, err := backend.Exchange(ctx, target.Service, peerID)
 	if err != nil {
-		return nil, fmt.Errorf("peerrpc: connect exchange: %w", err)
+		return nil, fmt.Errorf("peerrpc: ws exchange: %w", err)
 	}
 	return &Resolution{
 		Session:  session,

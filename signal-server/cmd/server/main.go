@@ -1,11 +1,8 @@
 // Command peerrpc-signal runs the standalone PeerRPC signaling server.
 //
-// It exposes peerrpc.signaling.SignalingService over HTTP. Thanks
-// to connect-go a single handler transparently serves:
-//
-//   - Connect clients (connect-go / @connectrpc/connect-web)
-//   - gRPC clients (grpc-go)
-//   - gRPC-Web clients (browsers, no Envoy required)
+// It serves the signaling rendezvous exclusively over WebSocket
+// (wss://host/ws). Both browser clients (WebSocketSignal) and Go
+// clients (signal.WS) speak this transport.
 //
 // Usage:
 //
@@ -13,7 +10,7 @@
 //
 // For development the binary defaults to no auth; production callers
 // should pass --auth-static=token1=alice,token2=bob (subject=peer) to
-// require a bearer token on every stream.
+// require a bearer token on every connection.
 package main
 
 import (
@@ -29,33 +26,29 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
 	"github.com/peerrpc/signal-server/server"
 	"github.com/peerrpc/signal-server/store"
 
-	"connectrpc.com/connect"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	authStatic := flag.String("auth-static", "", "comma-separated token=subject pairs (dev-only; production should use --jwt-secret)")
 	jwtSecret := flag.String("jwt-secret", "", "HMAC-SHA256 secret for JWT verification (production auth)")
-	tlsCert := flag.String("tls-cert", "", "path to TLS certificate (enables HTTPS)")
-	tlsKey := flag.String("tls-key", "", "path to TLS private key (enables HTTPS)")
+	tlsCert := flag.String("tls-cert", "", "path to TLS certificate (enables WSS)")
+	tlsKey := flag.String("tls-key", "", "path to TLS private key (enables WSS)")
 	autoTLS := flag.Bool("auto-tls", false, "generate an ephemeral self-signed cert at startup (for browser dev/testing)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// --auto-tls: generate an ephemeral self-signed certificate so
-	// browsers can reach connect-web (which requires HTTP/2-over-TLS)
-	// without pre-provisioned cert files.
+	// browsers can reach the WebSocket via wss:// without
+	// pre-provisioned cert files.
 	if *autoTLS && (*tlsCert == "" || *tlsKey == "") {
 		cert, key, err := generateSelfSignedCert()
 		if err != nil {
@@ -68,16 +61,14 @@ func main() {
 	}
 
 	mem := store.NewMemory()
-	svc := server.New(mem, server.Config{Logger: logger})
 
-	var opts []connect.HandlerOption
+	var validator auth.TokenValidator
 	switch {
 	case *jwtSecret != "":
 		// Production: HMAC-SHA256 JWT verifier. Tokens are issued
 		// elsewhere (typically by the same issuer that knows the
 		// secret — e.g. the application's auth service).
-		v := jwtVerifierAdapter{secret: []byte(*jwtSecret)}
-		opts = append(opts, connect.WithInterceptors(auth.NewInterceptor(v)))
+		validator = jwtVerifierAdapter{secret: []byte(*jwtSecret)}
 		logger.Info("JWT auth enabled")
 	case *authStatic != "":
 		v, err := parseStaticValidator(*authStatic)
@@ -85,7 +76,7 @@ func main() {
 			logger.Error("invalid --auth-static", "err", err)
 			os.Exit(2)
 		}
-		opts = append(opts, connect.WithInterceptors(auth.NewInterceptor(v)))
+		validator = v
 		logger.Info("static auth enabled", "tokens", len(v.Identities))
 	default:
 		logger.Warn("no auth configured; production deployments MUST pass --jwt-secret")
@@ -97,13 +88,13 @@ func main() {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
-	mux.Handle(path, handler)
 
-	// WebSocket signaling endpoint for browser clients. Browsers cannot
-	// do Connect bidi streaming (fetch lacks streaming request bodies),
-	// so they use wss://host/ws with the TS WebSocketSignal client.
-	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
+	// WebSocket signaling endpoint. The signaling service is served
+	// exclusively over WebSocket (ws:// cleartext or wss:// over TLS).
+	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{
+		Logger:    logger,
+		Validator: validator,
+	}))
 
 	// /healthz for liveness probes; the handler does not need a store
 	// round-trip because the binary itself is alive.
@@ -118,17 +109,15 @@ func main() {
 	})
 	mux.Handle("/metrics", promhttp.Handler())
 
-	// TLS vs h2c: when both cert and key are provided we serve HTTPS
-	// (HTTP/2 negotiation is automatic). Otherwise we fall back to
-	// h2c so gRPC clients still work over cleartext.
+	// TLS: when both cert and key are provided we serve HTTPS (so the
+	// WebSocket is wss://). Otherwise plain HTTP/1.1 (ws://) — the
+	// WebSocket upgrade works over HTTP/1.1 without h2c.
 	srv := &http.Server{
 		Addr:    *addr,
 		Handler: mux,
 	}
 	if *tlsCert != "" && *tlsKey != "" {
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	} else {
-		srv.Handler = h2c.NewHandler(mux, &http2.Server{})
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

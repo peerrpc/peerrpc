@@ -12,18 +12,14 @@ import (
 	"syscall"
 	"time"
 
-	signalingpbconnect "github.com/peerrpc/go/gen/connect/peerrpc/signaling/signalingpbconnect"
 	goauth "github.com/peerrpc/go/auth"
 	"github.com/peerrpc/go/observability"
 	"github.com/peerrpc/signal-server/auth"
 	"github.com/peerrpc/signal-server/server"
 	"github.com/peerrpc/signal-server/store"
 
-	"connectrpc.com/connect"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 var signalCmd = &cobra.Command{
@@ -31,8 +27,8 @@ var signalCmd = &cobra.Command{
 	Short: "Run the signaling server",
 	Long: `Start the standalone PeerRPC signaling server.
 
-Exposes peerrpc.signaling.SignalingService over HTTP (Connect,
-gRPC, and gRPC-Web via a single handler).`,
+Serves the signaling rendezvous exclusively over WebSocket
+(ws://host/ws or wss://host/ws).`,
 	RunE: runSignal,
 }
 
@@ -59,8 +55,8 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	// --auto-tls: generate an ephemeral self-signed certificate so
-	// browsers can reach connect-web (which requires HTTP/2-over-TLS)
-	// without pre-provisioned cert files.
+	// browsers can reach the WebSocket via wss:// without
+	// pre-provisioned cert files.
 	if signalFlags.autoTLS && (signalFlags.tlsCert == "" || signalFlags.tlsKey == "") {
 		cert, key, err := generateSelfSignedCert()
 		if err != nil {
@@ -73,13 +69,12 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	}
 
 	mem := store.NewMemory()
-	svc := server.New(mem, server.Config{Logger: logger})
 
-	var opts []connect.HandlerOption
+	var validator auth.TokenValidator
 	switch {
 	case signalFlags.jwtSecret != "":
 		v := jwtVerifierAdapter{secret: []byte(signalFlags.jwtSecret)}
-		opts = append(opts, connect.WithInterceptors(auth.NewInterceptor(v)))
+		validator = v
 		logger.Info("JWT auth enabled")
 	case signalFlags.authStatic != "":
 		v, err := parseStaticValidator(signalFlags.authStatic)
@@ -87,7 +82,7 @@ func runSignal(_ *cobra.Command, _ []string) error {
 			logger.Error("invalid --auth-static", "err", err)
 			return err
 		}
-		opts = append(opts, connect.WithInterceptors(auth.NewInterceptor(v)))
+		validator = v
 		logger.Info("static auth enabled", "tokens", len(v.Identities))
 	default:
 		logger.Warn("no auth configured; production deployments MUST pass --jwt-secret")
@@ -96,13 +91,13 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	_ = observability.NewMetrics(nil)
 
 	mux := http.NewServeMux()
-	path, handler := signalingpbconnect.NewSignalingServiceHandler(svc, opts...)
-	mux.Handle(path, handler)
 
-	// WebSocket signaling endpoint for browser clients (see
-	// server.WebSocketHandler for why Connect bidi is unreachable from
-	// a browser).
-	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{Logger: logger}))
+	// WebSocket signaling endpoint. The signaling service is served
+	// exclusively over WebSocket (ws:// cleartext or wss:// over TLS).
+	mux.Handle("/ws", server.WebSocketHandler(mem, server.Config{
+		Logger:    logger,
+		Validator: validator,
+	}))
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -115,14 +110,15 @@ func runSignal(_ *cobra.Command, _ []string) error {
 	})
 	mux.Handle("/metrics", promhttp.Handler())
 
+	// TLS: when both cert and key are provided we serve HTTPS (so the
+	// WebSocket is wss://). Otherwise plain HTTP/1.1 (ws://) — the
+	// WebSocket upgrade works over HTTP/1.1 without h2c.
 	srv := &http.Server{
 		Addr:    signalFlags.addr,
 		Handler: mux,
 	}
 	if signalFlags.tlsCert != "" && signalFlags.tlsKey != "" {
 		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	} else {
-		srv.Handler = h2c.NewHandler(mux, &http2.Server{})
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

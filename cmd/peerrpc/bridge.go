@@ -93,7 +93,7 @@ func runBridge(_ *cobra.Command, _ []string) error {
 
 	var backend signalsdk.Backend
 	if bridgeFlags.signalAddr != "" {
-		backend = signalsdk.NewRemote(bridgeFlags.signalAddr)
+		backend = signalsdk.NewWS(bridgeFlags.signalAddr)
 		logger.Info("using remote signaling", "addr", bridgeFlags.signalAddr)
 	} else {
 		backend = signalsdk.NewLocal()

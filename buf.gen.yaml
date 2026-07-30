@@ -5,19 +5,8 @@ plugins:
     out: peerrpc-go/gen/proto
     opt:
       - paths=source_relative
-  # Go: Connect-RPC service clients & handlers (signaling server / future bridges).
-  - remote: buf.build/connectrpc/go:v1.16.2
-    out: peerrpc-go/gen/connect
-    opt:
-      - paths=source_relative
   # TypeScript: protobuf runtime (@bufbuild/protobuf).
   - remote: buf.build/bufbuild/es:v1.10.0
-    out: peerrpc-ts/packages/peerrpc-protocol/src/gen
-    opt:
-      - target=ts
-      - import_extension=.js
-  # TypeScript: Connect-ES clients (@connectrpc/connect).
-  - remote: buf.build/connectrpc/es:v1.4.0
     out: peerrpc-ts/packages/peerrpc-protocol/src/gen
     opt:
       - target=ts

@@ -1,10 +1,16 @@
-// Package auth provides Connect interceptors that gate the signaling
+// Package auth provides token validation that gates the signaling
 // service on room tokens.
 //
 // v1 ships a TokenValidatorFunc abstraction and a StaticValidator
 // suitable for tests and single-binary deployments. Production
 // deployments SHOULD plug in a JWT validator that issues per-peer
 // credentials scoped to a specific room and expiry (PLAN.md §9.2).
+//
+// The signaling server consumes a TokenValidator from both the
+// WebSocket path. A token may be presented as the Authorization
+// header ("Bearer <token>" or bare token) or the "token" query
+// parameter (the latter is the canonical form for WebSocket clients,
+// which cannot always set headers during the handshake).
 package auth
 
 import (
@@ -12,7 +18,7 @@ import (
 	"errors"
 	"net/http"
 
-	"connectrpc.com/connect"
+	"github.com/gorilla/websocket"
 )
 
 // ErrUnauthenticated is returned by TokenValidator.Validate when the
@@ -57,20 +63,14 @@ func (s StaticValidator) Validate(_ context.Context, token string) (Identity, er
 	return Identity{}, ErrUnauthenticated
 }
 
-// NewInterceptor returns a connect.UnaryInterceptorFunc-style chain
-// entry that gates incoming requests. For the signaling server's
-// single Exchange RPC, this runs once when the bidi stream opens.
-func NewInterceptor(v TokenValidator) connect.Interceptor {
-	return connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			tok := bearerToken(req.Header())
-			id, err := v.Validate(ctx, tok)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeUnauthenticated, err)
-			}
-			return next(contextWithIdentity(ctx, id), req)
-		}
-	})
+// tokenFromRequest extracts the bearer token from an HTTP request,
+// checking the Authorization header first and falling back to the
+// "token" query parameter (used by WebSocket clients).
+func tokenFromRequest(r *http.Request) string {
+	if tok := bearerToken(r.Header); tok != "" {
+		return tok
+	}
+	return r.URL.Query().Get("token")
 }
 
 // bearerToken extracts the raw token from the Authorization header.
@@ -82,4 +82,36 @@ func bearerToken(h http.Header) string {
 		return v[len(prefix):]
 	}
 	return v
+}
+
+// AuthorizeRequest validates the token carried by r. On success it
+// returns the Identity; on failure it writes a 401 response (and, for
+// WebSocket handshakes, a close frame) and returns ok=false.
+//
+// When v is nil, every request is authorized (no auth configured).
+func AuthorizeRequest(w http.ResponseWriter, r *http.Request, v TokenValidator) (Identity, bool) {
+	if v == nil {
+		return Identity{}, true
+	}
+	tok := tokenFromRequest(r)
+	id, err := v.Validate(r.Context(), tok)
+	if err == nil {
+		return id, true
+	}
+	// Reject the WebSocket upgrade before it completes.
+	if isUpgradeRequest(r) {
+		// gorilla/websocket upgrader will not run our handler on a
+		// failed handshake; instead we write a plain 401. Some clients
+		// (browsers) hide the body, so a clear status line is enough.
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusUnauthorized)
+		return Identity{}, false
+	}
+	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	return Identity{}, false
+}
+
+// isUpgradeRequest reports whether r is a WebSocket upgrade request.
+func isUpgradeRequest(r *http.Request) bool {
+	return websocket.IsWebSocketUpgrade(r)
 }

@@ -40,8 +40,8 @@ an application-layer **relay** can forward traffic between two peers:
   transparent chunking at 256 KiB boundaries.
 - **Peer**: Manages the WebRTC PeerConnection lifecycle (offer/answer
   via signaling).
-- **Signaling**: The rendezvous channel (in-process Local or remote
-  connect-go signal-server) that exchanges SDP offers/answers and ICE
+- **Signaling**: The rendezvous channel (in-process Local or a remote
+  WebSocket signal-server) that exchanges SDP offers/answers and ICE
   candidates.
 - **RPC**: Server multiplexes streams over one DataChannel; Client
   allocates sequence numbers and dispatches responses.

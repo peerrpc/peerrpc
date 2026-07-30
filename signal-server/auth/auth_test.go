@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/peerrpc/signal-server/auth"
-
-	"connectrpc.com/connect"
 )
 
 func TestStaticValidator(t *testing.T) {
@@ -25,56 +24,40 @@ func TestStaticValidator(t *testing.T) {
 	}
 }
 
-func TestBearerToken(t *testing.T) {
-	h := http.Header{}
-	h.Set("Authorization", "Bearer abc123")
-	if got := bearerTokenForTest(h); got != "abc123" {
-		t.Fatalf("got %q", got)
-	}
-	h.Set("Authorization", "raw-token")
-	if got := bearerTokenForTest(h); got != "raw-token" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-// bearerTokenForTest is a small re-export because the package's
-// bearerToken is unexported. The interceptor's runtime behavior is
-// covered indirectly via integration tests against the server; this
-// unit test just exercises the parsing edge cases.
-func bearerTokenForTest(h http.Header) string {
-	// Match the production helper's logic exactly.
-	v := h.Get("Authorization")
-	const prefix = "Bearer "
-	if len(v) > len(prefix) && v[:len(prefix)] == prefix {
-		return v[len(prefix):]
-	}
-	return v
-}
-
-// TestInterceptor_GatesUnauthorized invokes the interceptor with no
-// token and asserts it returns Unauthenticated.
-func TestInterceptor_GatesUnauthorized(t *testing.T) {
+func TestAuthorizeRequest_HeaderAndQuery(t *testing.T) {
 	v := auth.StaticValidator{Identities: map[string]auth.Identity{
 		"valid": {Subject: "alice"},
 	}}
-	interceptor := auth.NewInterceptor(v)
 
-	called := false
-	wrapped := interceptor.WrapUnary(func(_ context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
-		called = true
-		return nil, nil
-	})
+	// Bearer header.
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	rec := httptest.NewRecorder()
+	if _, ok := auth.AuthorizeRequest(rec, req, v); !ok {
+		t.Fatalf("bearer header: expected authorized, got status %d", rec.Code)
+	}
 
-	req := connect.NewRequest[any](nil)
-	_, err := wrapped(context.Background(), req)
-	if called {
-		t.Fatal("next should not have been called without a token")
+	// Query param fallback.
+	req = httptest.NewRequest(http.MethodGet, "/ws?token=valid", nil)
+	rec = httptest.NewRecorder()
+	if _, ok := auth.AuthorizeRequest(rec, req, v); !ok {
+		t.Fatalf("query token: expected authorized, got status %d", rec.Code)
 	}
-	if err == nil {
-		t.Fatal("expected error")
+
+	// Missing token.
+	req = httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rec = httptest.NewRecorder()
+	if _, ok := auth.AuthorizeRequest(rec, req, v); ok {
+		t.Fatalf("missing token: expected unauthorized")
 	}
-	connErr := new(connect.Error)
-	if !errors.As(err, &connErr) || connErr.Code() != connect.CodeUnauthenticated {
-		t.Fatalf("expected CodeUnauthenticated, got %v", err)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing token: got status %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	// Nil validator => always authorized (no auth configured).
+	req = httptest.NewRequest(http.MethodGet, "/ws", nil)
+	rec = httptest.NewRecorder()
+	if _, ok := auth.AuthorizeRequest(rec, req, nil); !ok {
+		t.Fatalf("nil validator: expected authorized")
 	}
 }
