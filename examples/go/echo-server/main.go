@@ -14,7 +14,7 @@
 //	make run-echo-server
 //
 //	# terminal 3
-//	make run-ts-echo
+//	make run-echo-ts
 //
 // Then connect from the browser echo page and exercise the RPCs.
 package main

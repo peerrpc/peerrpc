@@ -9,12 +9,12 @@
  *   /echo.Echo/Collect  Client-Streaming
  *   /echo.Echo/Chat     Bidi-Streaming
  *
- * Run:  make run-signal         (terminal 1)
- *       make run-ts-echo-server (terminal 2)
+ * Run:  make run-signal          (terminal 1)
+ *       make run-echo-server-ts  (terminal 2)
  *
  * Then open this page, accept the self-signed cert warning at
  * https://localhost:8443, and click "Start Listening". In another tab
- * open the echo client (make run-ts-echo) to issue RPCs.
+ * open the echo client (make run-echo-ts) to issue RPCs.
  */
 
 import { listen, type Listener } from "@peerrpc/peerrpc";

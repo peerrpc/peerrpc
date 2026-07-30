@@ -6,10 +6,15 @@ CARGO ?= cargo
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
 .PHONY: test-all test-go test-rs test-ts
-.PHONY: run-signal run-ts-echo run-ts-echo-react run-echo-server run-ts-echo-server run-echo
-.PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
-.PHONY: run-echo-rs
-.PHONY: run-interop-server run-interop-rs run-interop-e2e run-sample
+
+# Quick-start targets (signal-server + echo server + browser client).
+.PHONY: run-signal run-echo run-echo-server run-echo-server-ts run-echo-ts run-echo-react
+
+# Local (single-process, no signal-server) demos.
+.PHONY: run-local-echo-go run-local-echo-rs run-local-facade-go run-local-facade-ts run-local-facade-rs run-local-facades
+
+# Cross-language interop samples (test/cross-lang/).
+.PHONY: run-interop-server run-interop-rs run-interop-e2e
 
 all: lint generate gen-vectors test-vectors
 
@@ -83,7 +88,7 @@ build-rs:
 # Run each in a separate terminal:
 #   make run-signal       # signal-server (cleartext h2c; no TLS setup)
 #   make run-echo-server  # Go echo RPC server (all 4 types)
-#   make run-ts-echo      # Vite dev server for the browser echo page
+#   make run-echo-ts      # Vite dev server for the browser echo page
 #
 # Then open the printed Vite URL and click "Connect". For a TLS setup
 # (wss://) pass SIGNAL_TLS=1 and accept the self-signed cert first.
@@ -98,50 +103,49 @@ run-signal:
 run-echo-server:
 	cd examples/go/echo-server && $(GO) run .
 
-run-ts-echo:
+run-echo-ts:
 	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
-run-ts-echo-react:
+run-echo-react:
 	cd examples/ts/echo-react && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
-run-ts-echo-server:
+run-echo-server-ts:
 	cd examples/ts/echo-server && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
 # Convenience: prints instructions for the three-terminal quick start.
 run-echo:
 	@echo "Run each in a separate terminal:"
 	@echo "  make run-signal"
-	@echo "  make run-echo-server   (Go)  or  make run-ts-echo-server  (browser)"
-	@echo "  make run-ts-echo       (vanilla TS)  or  make run-ts-echo-react  (React)"
+	@echo "  make run-echo-server   (Go)  or  make run-echo-server-ts  (browser)"
+	@echo "  make run-echo-ts       (vanilla TS)  or  make run-echo-react  (React)"
 	@echo ""
 	@echo "Then open the Vite URL and click Connect. No TLS setup needed"
 	@echo "(cleartext by default; use SIGNAL_TLS=1 for wss://)."
 
 # ── Per-language echo demos (local signaling, no server needed) ───
 
-run-echo-go:
-	$(GO) run ./examples/go/echo
+run-local-echo-go:
+	cd examples/go/echo && $(GO) run .
 
-run-echo-rs:
+run-local-echo-rs:
 	$(CARGO) run --manifest-path examples/rs/echo/Cargo.toml
 
 # ── Facade examples (each language, local-only signaling) ────────
 
-run-facade-go:
-	$(GO) run ./examples/go/facade
+run-local-facade-go:
+	cd examples/go/facade && $(GO) run .
 
-run-facade-ts: build-ts
-	$(NPM) --prefix examples/ts/facade install
-	$(NPM) --prefix examples/ts/facade run dev
+run-local-facade-ts: build-ts
+	cd examples/ts/facade && $(NPM) install && $(NPM) run dev
 
-run-facade-rs: build-rs
+run-local-facade-rs: build-rs
 	$(CARGO) run --manifest-path examples/rs/facade/Cargo.toml
 
-run-facades:
+run-local-facades:
 	@echo "Run each facade in a separate terminal:"
-	@echo "  make run-facade-go"
-	@echo "  make run-facade-ts"
-	@echo "  make run-facade-rs"
+	@echo "  make run-local-facade-go"
+	@echo "  make run-local-facade-ts"
+	@echo "  make run-local-facade-rs"
 
 # ── Cross-language interop samples ──────────────────────────────
 #
@@ -165,5 +169,3 @@ run-interop-e2e:
 	@echo "  make run-interop-server"
 	@echo ""
 	cd test/cross-lang/go-ts/e2e && $(NPM) install && npx playwright test
-
-run-sample: run-interop-server

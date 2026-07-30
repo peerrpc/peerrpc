@@ -7,7 +7,7 @@
  * server or any compatible PeerRPC server.
  *
  * Run:  make run-signal   (terminal 1)
- *       make run-ts-echo  (terminal 2)
+ *       make run-echo-ts  (terminal 2)
  *
  * Then open the printed Vite URL, accept the self-signed cert warning
  * for the signal-server (https://localhost:8443), and click Connect.
