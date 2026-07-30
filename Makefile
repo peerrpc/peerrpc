@@ -59,7 +59,7 @@ SIGNAL_ADDR ?= :8443
 ECHO_PORT   ?= 5173
 
 run-signal:
-	cd cmd/peerrpc && $(GO) run . signal -addr $(SIGNAL_ADDR) -auto-tls
+	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) --auto-tls
 
 run-ts-echo:
 	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
