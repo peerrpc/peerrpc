@@ -363,26 +363,26 @@ fn setup_on_message(dc: &Arc<RTCDataChannel>, tx: mpsc::UnboundedSender<Bytes>) 
 /// Go transport's OnBufferedAmountLow handling so a burst of large
 /// frames does not overflow the SCTP send buffer.
 ///
-/// `on_buffered_amount_low` and `on_close` are registered inline (they
-/// take sync callbacks); `set_buffered_amount_low_threshold` is async
-/// in webrtc-rs 0.17, so it runs on a spawned task (this fn is called
-/// from both async and sync-on_data_channel contexts).
+/// `on_buffered_amount_low` and `set_buffered_amount_low_threshold`
+/// are async in webrtc-rs 0.17, so they run on spawned tasks; `on_close`
+/// is still sync and is registered inline (this fn is called from
+/// both async and sync-on_data_channel contexts).
 fn setup_backpressure(dc: &Arc<RTCDataChannel>, buffered_low: Arc<Notify>, closed: Arc<Notify>) {
-    // on_buffered_amount_low is sync in webrtc-rs 0.17; register it
-    // inline so the callback is armed before any dc.send() can fire
-    // the event. (An earlier version wrapped this in tokio::spawn
-    // because the threshold setter is async, but the spawn meant the
-    // low-watermark callback was registered AFTER the first burst of
-    // large sends, and webrtc-rs reset the SCTP stream before the
-    // callback could catch the drain event — tearing down the
-    // channel mid-echo.)
+    // Wire up on_buffered_amount_low: wake any blocked senders.
+    // This method is async in webrtc-rs 0.17; spawn a task to
+    // register the handler (mirrors transport::Channel::new).
     let bl = buffered_low.clone();
-    dc.on_buffered_amount_low(Box::new(move || {
-        let bl = bl.clone();
-        Box::pin(async move {
-            bl.notify_waiters();
-        })
-    }));
+    let dc_clone = dc.clone();
+    tokio::spawn(async move {
+        dc_clone
+            .on_buffered_amount_low(Box::new(move || {
+                let bl = bl.clone();
+                Box::pin(async move {
+                    bl.notify_waiters();
+                })
+            }))
+            .await;
+    });
 
     // set_buffered_amount_low_threshold is async, so run it on a task.
     let dc_clone = dc.clone();
@@ -392,14 +392,15 @@ fn setup_backpressure(dc: &Arc<RTCDataChannel>, buffered_low: Arc<Notify>, close
             .await;
     });
 
-    // Tear down sends if the DataChannel closes.
+    // Tear down sends if the DataChannel closes. on_close is sync in
+    // webrtc-rs 0.17, so register it inline.
     let cl = closed.clone();
     dc.on_close(Box::new(move || {
         let cl = cl.clone();
         Box::pin(async move {
             cl.notify_waiters();
         })
-    }))
+    }));
 }
 
 fn setup_on_open(dc: &Arc<RTCDataChannel>, notify: Arc<Notify>) {
