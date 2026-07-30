@@ -245,3 +245,12 @@ make tidy
 | Go         | Done     | Done      | Done | Done| Done      | Done  | Done   | N/A   |
 | TypeScript | Done     | Done      | Done | Done| Done      | N/A   | N/A    | Done  |
 | Rust       | Done     | Done      | Done | Done| N/A       | N/A   | N/A    | N/A   |
+
+## Further reading
+
+- **[SCTP max-message-size and Adaptive Chunking](sctp-message-sizing.md)** —
+  why each SDK ships a different `CHUNK_SIZE` (60 KiB on the TS
+  client, 255 KiB on Go/Rust), how the `a=max-message-size` SDP
+  attribute is negotiated end-to-end, and the post-send backpressure
+  pattern that makes large-payload RPCs (Large Echo / Large Echo
+  Stream) work over WebRTC.
