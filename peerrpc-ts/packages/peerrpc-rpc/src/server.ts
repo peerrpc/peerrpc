@@ -208,6 +208,11 @@ export class Server {
     let resolveClosed: () => void;
     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
 
+    // The server reads inbound client->server Frames, so the transport
+    // must decode them as Frame (not ResponseFrame). Without this the
+    // default "response" mode would misparse every Call as a Begin.
+    ch.setDecodeMode("request");
+
     ch.onFrame((frame: Frame) => {
       const seq = frame.routing?.sequence ?? 0;
 

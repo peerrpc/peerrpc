@@ -23,6 +23,10 @@ class FakeChannel implements Channel {
   onFrame(cb: (f: Frame) => void): void { this.frameCb = cb; }
   onClose(cb: () => void): void { this.closeCb = cb; }
   async send(f: Frame): Promise<void> { this.sent.push(f); }
+  // FakeChannel pushes already-decoded Frame objects, so the decode
+  // mode is a no-op here. Implemented to satisfy the Channel interface
+  // now that Server.serve calls setDecodeMode("request").
+  setDecodeMode(_mode: "response" | "request"): void { /* no-op */ }
 
   /** Test helper: simulate an inbound frame from the client. */
   push(f: Frame): void { this.frameCb?.(f); }
