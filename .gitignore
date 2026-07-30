@@ -45,8 +45,8 @@ relay-server/server
 signal-server/serverbin/
 
 # Example binaries (produced by `go run`/`go build` in examples/)
-examples/go/echo-server/peerrpc-echo-server
-examples/go/facade/peerrpc-facade
+examples/echo-server-go/peerrpc-echo-server
+examples/facade-go/peerrpc-facade
 
 # Interop binaries
 test/cross-lang/go-ts/interop-ts

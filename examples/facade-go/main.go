@@ -1,14 +1,14 @@
 // Command peerrpc-facade-demo is the PeerRPC end-to-end demo using
 // the new top-level peerrpc.Dial / peerrpc.Listen facade.
 //
-// Compared to the v1 examples/go/echo demo (which manually wires
+// Compared to the v1 examples/echo-go demo (which manually wires
 // signal.Backend + peer.Peer + rpc.Server + goroutines), this
 // version does the same work in roughly a dozen lines and exposes
 // no magic strings (no "demo-room", no "offerer"/"answerer").
 //
 // Run:
 //
-//	go run ./examples/go/facade
+//	go run ./examples/facade-go
 package main
 
 import (

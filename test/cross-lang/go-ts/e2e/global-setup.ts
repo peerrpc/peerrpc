@@ -9,7 +9,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "../../../..");
-const TS_DEMO = join(ROOT, "examples/ts/echo");
+const TS_DEMO = join(ROOT, "examples/echo-ts");
 const GO_INTEROP = resolve(import.meta.dirname, "..");
 const TLS_DIR = join(GO_INTEROP, ".tls");
 const PORT = 30443;

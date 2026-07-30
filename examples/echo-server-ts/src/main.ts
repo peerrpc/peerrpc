@@ -3,7 +3,7 @@
  *
  * Acts as a PeerRPC server (Answerer) behind a signal-server and
  * serves the echo.Echo service with all RPC types, mirroring the Go
- * echo-server (examples/go/echo-server):
+ * echo-server (examples/echo-server-go):
  *
  *   /echo.Echo/Echo                Unary
  *   /echo.Echo/Stream              Server-Streaming

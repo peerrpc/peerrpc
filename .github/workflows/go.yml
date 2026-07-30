@@ -5,7 +5,7 @@
 #   signal-server/     — standalone signaling server
 #   relay-server/      — standalone relay binary
 #   grpcbridge-server/ — standalone gRPC-Connect bridge binary
-#   examples/go/echo/  — end-to-end echo demo
+#   examples/echo-go/  — end-to-end echo demo
 #   test/cross-lang/go-ts/e2e/ — cross-language interop (Playwright, build-tag guarded)
 
 name: go

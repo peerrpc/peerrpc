@@ -12,7 +12,7 @@ import (
 )
 
 // registerEcho installs a tiny unary + server-streaming echo service
-// onto srv. Mirrors what examples/go/echo does by hand.
+// onto srv. Mirrors what examples/echo-go does by hand.
 func registerEcho(srv *rpc.Server) {
 	srv.RegisterService(rpc.ServiceDesc{
 		ServiceName: "echo.Echo",

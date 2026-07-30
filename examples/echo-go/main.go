@@ -10,7 +10,7 @@
 //
 // Usage:
 //
-//	go run ./examples/go/echo
+//	go run ./examples/echo-go
 package main
 
 import (

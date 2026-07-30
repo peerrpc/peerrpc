@@ -53,8 +53,8 @@ test-go:
 # Rust: the SDK workspace, then the standalone example crates.
 test-rs:
 	$(CARGO) test --manifest-path peerrpc-rs/Cargo.toml --workspace
-	cd examples/rs/echo && $(CARGO) test
-	cd examples/rs/facade && $(CARGO) test
+	cd examples/echo-rs && $(CARGO) test
+	cd examples/facade-rs && $(CARGO) test
 
 # TypeScript: vitest discovers and runs every *.test.ts.
 test-ts:
@@ -101,16 +101,16 @@ run-signal:
 	cd cmd/peerrpc && $(GO) run . signal --addr $(SIGNAL_ADDR) $(if $(filter 1,$(SIGNAL_TLS)),--auto-tls)
 
 run-echo-server:
-	cd examples/go/echo-server && $(GO) run .
+	cd examples/echo-server-go && $(GO) run .
 
 run-echo-ts:
-	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
+	cd examples/echo-ts && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
 run-echo-react:
-	cd examples/ts/echo-react && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
+	cd examples/echo-react && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
 run-echo-server-ts:
-	cd examples/ts/echo-server && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
+	cd examples/echo-server-ts && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
 # Convenience: prints instructions for the three-terminal quick start.
 run-echo:
@@ -125,18 +125,18 @@ run-echo:
 # ── Per-language echo demos (local signaling, no server needed) ───
 
 run-local-echo-go:
-	cd examples/go/echo && $(GO) run .
+	cd examples/echo-go && $(GO) run .
 
 run-local-echo-rs:
-	$(CARGO) run --manifest-path examples/rs/echo/Cargo.toml
+	$(CARGO) run --manifest-path examples/echo-rs/Cargo.toml
 
 # ── Facade examples (each language, local-only signaling) ────────
 
 run-local-facade-go:
-	cd examples/go/facade && $(GO) run .
+	cd examples/facade-go && $(GO) run .
 
 run-local-facade-rs: build-rs
-	$(CARGO) run --manifest-path examples/rs/facade/Cargo.toml
+	$(CARGO) run --manifest-path examples/facade-rs/Cargo.toml
 
 run-local-facades:
 	@echo "Run each facade in a separate terminal:"

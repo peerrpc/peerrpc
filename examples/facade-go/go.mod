@@ -1,4 +1,4 @@
-module example.com/peerrpc-echo
+module example.com/peerrpc-facade
 
 go 1.25.0
 
@@ -32,4 +32,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/peerrpc/go => ../../../peerrpc-go
+replace github.com/peerrpc/go => ../../peerrpc-go

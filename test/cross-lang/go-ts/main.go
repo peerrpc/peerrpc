@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	peerrpc-interop-ts -addr :3000 -static /path/to/examples/ts/echo/dist
+//	peerrpc-interop-ts -addr :3000 -static /path/to/examples/echo-ts/dist
 //
 // Then open http://localhost:3000 in a browser.
 package main

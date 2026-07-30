@@ -3,7 +3,7 @@
 // service with all four RPC types (Unary / Server-Streaming /
 // Client-Streaming / Bidi).
 //
-// It is the server counterpart to examples/ts/echo (the browser client).
+// It is the server counterpart to examples/echo-ts (the browser client).
 // Run a signal-server first, then this server, then open the browser
 // echo page:
 //

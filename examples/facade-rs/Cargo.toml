@@ -10,6 +10,6 @@ name = "peerrpc-facade-demo"
 path = "src/main.rs"
 
 [dependencies]
-peerrpc = { path = "../../../peerrpc-rs/peerrpc" }
-peerrpc-rpc = { path = "../../../peerrpc-rs/rpc" }
+peerrpc = { path = "../../peerrpc-rs/peerrpc" }
+peerrpc-rpc = { path = "../../peerrpc-rs/rpc" }
 tokio = { version = "1", features = ["full"] }

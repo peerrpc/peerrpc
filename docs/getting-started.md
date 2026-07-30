@@ -124,7 +124,7 @@ go client.Attach(ctx)
 resp, status, _ := client.InvokeUnary(ctx, "/echo.Echo/Echo", reqBytes)
 ```
 
-See `examples/go/echo/` for a complete working example.
+See `examples/echo-go/` for a complete working example.
 
 ## TypeScript Quickstart
 
