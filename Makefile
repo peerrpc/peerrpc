@@ -5,7 +5,7 @@ CARGO ?= cargo
 
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
-.PHONY: run-signal run-ts-echo run-echo-server run-ts-echo-server run-echo
+.PHONY: run-signal run-ts-echo run-ts-echo-react run-echo-server run-ts-echo-server run-echo
 .PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-echo-rs
 .PHONY: run-interop-server run-interop-rs run-interop-e2e run-sample
@@ -69,6 +69,9 @@ run-echo-server:
 run-ts-echo:
 	cd examples/ts/echo && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
+run-ts-echo-react:
+	cd examples/ts/echo-react && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
+
 run-ts-echo-server:
 	cd examples/ts/echo-server && $(NPM) install && $(NPM) run dev -- --port $(ECHO_PORT)
 
@@ -77,7 +80,7 @@ run-echo:
 	@echo "Run each in a separate terminal:"
 	@echo "  make run-signal"
 	@echo "  make run-echo-server   (Go)  or  make run-ts-echo-server  (browser)"
-	@echo "  make run-ts-echo"
+	@echo "  make run-ts-echo       (vanilla TS)  or  make run-ts-echo-react  (React)"
 	@echo ""
 	@echo "Then open the Vite URL and click Connect. No TLS setup needed"
 	@echo "(cleartext by default; use SIGNAL_TLS=1 for wss://)."

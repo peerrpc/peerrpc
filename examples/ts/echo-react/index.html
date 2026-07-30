@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeerRPC Echo (React)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+    h1 { font-size: 1.4em; }
+    .row { margin: 0.5em 0; }
+    button { padding: 0.3em 0.8em; margin-right: 0.3em; }
+    button:disabled { opacity: 0.5; }
+    #log { background: #f5f5f5; border: 1px solid #ddd; padding: 0.5em; height: 320px; overflow-y: auto; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; }
+    .info { color: #666; font-size: 0.85em; }
+    input { width: 300px; }
+    .status { font-weight: bold; }
+    .ok { color: green; }
+    .err { color: red; }
+    .connecting { color: orange; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
