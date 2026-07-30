@@ -5,6 +5,7 @@ CARGO ?= cargo
 
 .PHONY: all lint generate gen-vectors test-vectors check-go tidy build-peerrpc build-peerrpc-interop-ts
 .PHONY: build-ts build-rs
+.PHONY: all-test test-go test-rust test-ts
 .PHONY: run-signal run-ts-echo run-ts-echo-react run-echo-server run-ts-echo-server run-echo
 .PHONY: run-echo-go run-facade-go run-facade-ts run-facade-rs run-facades
 .PHONY: run-echo-rs
@@ -23,6 +24,37 @@ gen-vectors:
 
 test-vectors:
 	cd peerrpc-go && $(GO) test ./protocol/...
+
+# ── All-language test suite ────────────────────────────────────────
+#
+# Runs every SDK and server test suite. Each sub-target is independent
+# so you can run a single language:
+#   make test-go
+#   make test-rust
+#   make test-ts
+
+all-test: test-go test-rust test-ts
+
+# Go: the main SDK (with -race) + the standalone server modules.
+# Examples are demo binaries with no tests, so they are skipped.
+GO_TEST_DIRS := peerrpc-go signal-server relay-server grpcbridge-server cmd/peerrpc
+
+test-go:
+	@for dir in $(GO_TEST_DIRS); do \
+		echo "=== go test $$dir ==="; \
+		(cd $$dir && $(GO) test ./... -race -count=1 -timeout 180s) || exit 1; \
+	done
+
+# Rust: the SDK workspace, then the standalone example crates.
+test-rust:
+	$(CARGO) test --manifest-path peerrpc-rs/Cargo.toml --workspace
+	cd examples/rs/echo && $(CARGO) test
+	cd examples/rs/facade && $(CARGO) test
+
+# TypeScript: vitest discovers and runs every *.test.ts.
+test-ts:
+	$(NPM) --prefix peerrpc-ts install >/dev/null
+	$(NPM) --prefix peerrpc-ts run test
 
 check-go:
 	cd peerrpc-go && $(GO) build ./... && $(GO) vet ./...
