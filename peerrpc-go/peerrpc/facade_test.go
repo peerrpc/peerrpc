@@ -2,8 +2,10 @@ package peerrpc_test
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 )
 
 // registerEcho installs a tiny unary + server-streaming echo service
-// onto srv. Mirrors what examples/echo-go does by hand.
+// onto srv. Mirrors what examples/local-echo-go does by hand.
 func registerEcho(srv *rpc.Server) {
 	srv.RegisterService(rpc.ServiceDesc{
 		ServiceName: "echo.Echo",
@@ -243,5 +245,99 @@ func TestFacade_MultiClient(t *testing.T) {
 		// Give the server-side Serve loop a beat to recycle before
 		// the next client connects.
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// TestFacade_DialUnary_WithIdentity is the end-to-end regression
+// test for the WithIdentity-silently-dropped bug. With WithIdentity
+// supplied, Conn.PeerID() must start with "ed25519:" and be exactly
+// the canonical derivation for that key (prefix + 44-char base58 of
+// the 32-byte public key). Without WithIdentity, the resolver's
+// UUID fallback must be used and PeerID() must not be prefixed.
+//
+// The "two Dials with the same key produce the same peer_id"
+// property is covered by the unit test TestDerivePeerID_StableAndPrefixed
+// in derive_test.go; this end-to-end test focuses on the contract
+// surface, because the local resolver (one peer_id per service)
+// rejects simultaneous duplicates.
+func TestFacade_DialUnary_WithIdentity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+
+	ln, err := peerrpc.Listen(ctx, "peerrpc+local:///echo.Echo")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	defer ln.Close()
+
+	go func() { _ = ln.Serve(ctx, newEchoServer) }()
+
+	// With-identity path: peer_id is derived from the public key.
+	withID, err := peerrpc.Dial(ctx, "peerrpc+local:///echo.Echo",
+		peerrpc.WithIdentity(priv))
+	if err != nil {
+		t.Fatalf("Dial WithIdentity: %v", err)
+	}
+	defer withID.Close()
+
+	// Format: "ed25519:" + 44-char base58 of the 32-byte public key.
+	// 32 bytes encode to at most ceil(32*log(256)/log(58)) = 44 chars
+	// in the Bitcoin alphabet; for a random key no leading zeros
+	// survive so the output is exactly 44 chars.
+	if !strings.HasPrefix(withID.PeerID(), "ed25519:") {
+		t.Errorf("WithIdentity PeerID %q missing ed25519: prefix", withID.PeerID())
+	}
+	if got, want := len(withID.PeerID()), len("ed25519:")+44; got != want {
+		t.Errorf("WithIdentity PeerID length = %d, want %d (got %q)",
+			got, want, withID.PeerID())
+	}
+
+	// The body of the peer_id must be valid Bitcoin base58 (0/O/I/l
+	// excluded). A future refactor that hashed or truncated the key
+	// would change the alphabet set; this check pins it.
+	body := strings.TrimPrefix(withID.PeerID(), "ed25519:")
+	for i, r := range body {
+		if !strings.ContainsRune(
+			"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz",
+			r) {
+			t.Errorf("body[%d] = %q is not a base58 alphabet char", i, r)
+			break
+		}
+	}
+
+	// A different key must produce a different peer_id. (The local
+	// resolver allows distinct peer_ids in the same service, so this
+	// is just a sanity check that the derivation actually consults
+	// the key.)
+	_, otherPriv, _ := ed25519.GenerateKey(nil)
+	other, err := peerrpc.Dial(ctx, "peerrpc+local:///echo.Echo",
+		peerrpc.WithIdentity(otherPriv))
+	if err != nil {
+		t.Fatalf("Dial WithIdentity (other key): %v", err)
+	}
+	defer other.Close()
+	if other.PeerID() == withID.PeerID() {
+		t.Errorf("two distinct keys produced the same peer_id %q", withID.PeerID())
+	}
+	if !strings.HasPrefix(other.PeerID(), "ed25519:") {
+		t.Errorf("other-key PeerID %q missing ed25519: prefix", other.PeerID())
+	}
+
+	// No-identity path: resolver's UUID fallback, no "ed25519:" prefix.
+	noID, err := peerrpc.Dial(ctx, "peerrpc+local:///echo.Echo")
+	if err != nil {
+		t.Fatalf("Dial (no identity): %v", err)
+	}
+	defer noID.Close()
+	if noID.PeerID() == "" {
+		t.Error("no-identity PeerID is empty")
+	}
+	if strings.HasPrefix(noID.PeerID(), "ed25519:") {
+		t.Errorf("no-identity PeerID %q unexpectedly prefixed", noID.PeerID())
 	}
 }

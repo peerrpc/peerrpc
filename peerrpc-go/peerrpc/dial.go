@@ -47,6 +47,16 @@ func DialTarget(ctx context.Context, target Target, opts ...DialOption) (*Conn, 
 	if cfg.token != "" {
 		cfg.target.Token = cfg.token
 	}
+	// WithIdentity derives a stable peer_id from the public key when
+	// the caller did not pick one explicitly. We do this here rather
+	// than inside WithIdentity itself so that any later option (e.g.
+	// a future WithPeerID on a Builder) wins the precedence ordering
+	// without us having to teach WithIdentity about peer_id.
+	if cfg.target.PeerID == "" {
+		if id, ok := derivePeerID(cfg.identity); ok {
+			cfg.target.PeerID = id
+		}
+	}
 	return dialTarget(ctx, cfg)
 }
 

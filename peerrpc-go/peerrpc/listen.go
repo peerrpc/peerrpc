@@ -68,6 +68,16 @@ func ListenTarget(ctx context.Context, target Target, opts ...ListenOption) (*Li
 	if cfg.target.Role == "" {
 		cfg.target.Role = RoleHintServer
 	}
+	// WithIdentity pins a stable prefix on the listener's peer_id
+	// template. Each Accept still suffixes the template with a
+	// short random ID (see Listener.Accept) so concurrent clients
+	// get distinct peer_ids, but the prefix is reproducible across
+	// restarts when the same key is used.
+	if cfg.target.PeerID == "" {
+		if id, ok := derivePeerID(cfg.identity); ok {
+			cfg.target.PeerID = id
+		}
+	}
 	if _, err := resolveProbe(cfg.target); err != nil {
 		return nil, err
 	}

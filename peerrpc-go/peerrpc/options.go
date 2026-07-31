@@ -76,12 +76,26 @@ func WithToken(token string) option {
 	}
 }
 
-// WithIdentity injects an Ed25519 private key whose derived PeerID
-// is announced on the signaling stream. Servers accept the key on the
-// wire but do NOT yet verify signatures server-side; full
-// verification ships in a future release. Until then this option only affects
-// the peer_id derivation (hash of the public key) when Target.PeerID
-// is empty.
+// WithIdentity injects an Ed25519 private key. The public key is used
+// to derive a stable, self-describing peer_id of the form
+// "ed25519:<base58(publicKey)>" whenever the caller has not set
+// Target.PeerID explicitly. The same key produces the same peer_id
+// across processes, so two peers that hold the matching key pair can
+// rendezvous on a known identity without an out-of-band coordination
+// step.
+//
+// The current SDK does NOT sign or verify any messages with this key:
+// there is no proof-of-possession handshake on the signaling stream
+// today. Full server-side signature verification is planned for a
+// future release; the wire field reserved for the public key already
+// exists in proto/peerrpc/signaling/signaling.proto
+// (AnnounceRequest.peer_pubkey) but is unused by the Go SDK. Treat
+// WithIdentity as a peer_id-derivation helper until that handshake
+// lands; do not rely on it for authentication.
+//
+// If priv is the wrong length (not ed25519.PrivateKeySize) the option
+// is silently ignored and the resolver falls back to its normal UUID
+// generation.
 func WithIdentity(priv ed25519.PrivateKey) option {
 	return func(d *dialConfig, l *listenConfig) {
 		if d != nil {
@@ -91,6 +105,23 @@ func WithIdentity(priv ed25519.PrivateKey) option {
 			l.identity = priv
 		}
 	}
+}
+
+// derivePeerID returns the canonical peer_id for a given Ed25519
+// private key: "ed25519:" + base58(priv.Public()). The second return
+// value is false when priv has the wrong length; callers fall back
+// to UUID generation in that case.
+//
+// The prefix is load-bearing: it disambiguates an identity-derived
+// peer_id from a UUID- or user-chosen peer_id at a glance, and it
+// reserves the namespace so a future secp256k1 or P-256 variant can
+// introduce its own prefix without conflict.
+func derivePeerID(priv ed25519.PrivateKey) (string, bool) {
+	if len(priv) != ed25519.PrivateKeySize {
+		return "", false
+	}
+	pub := priv.Public().(ed25519.PublicKey)
+	return "ed25519:" + encodeBase58(pub), true
 }
 
 // WithICEServers configures the WebRTC ICE servers (STUN/TURN).
